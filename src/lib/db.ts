@@ -8,13 +8,14 @@ function create(): Sql {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not configured');
   return postgres(url, {
-    max: process.env.VERCEL ? 5 : 10,
-    // Supavisor/PgBouncer transaction pooling does not reliably support pipelined queries:
-    // keep exactly one in-flight query per connection.
-    ...({ max_pipeline: 1 } as object),
-    idle_timeout: 20,
+    // Use the pooler in *session* mode (port 5432): transaction-mode multiplexing was observed to
+    // desync extended-protocol queries under concurrency. Keep the per-instance pool small and
+    // release idle sessions quickly so serverless instances don't exhaust the pooler.
+    max: process.env.VERCEL ? 3 : 10,
+    idle_timeout: process.env.VERCEL ? 10 : 20,
+    max_lifetime: 60 * 5,
     connect_timeout: 15,
-    prepare: false, // required for PgBouncer / Supavisor transaction pooling
+    prepare: false, // safe with any pooler mode
     ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require',
     transform: { undefined: null },
     // BIGSERIAL ids/counts as JS numbers (all values are far below 2^53)

@@ -61,7 +61,7 @@ node tests/smoke-pages.mjs http://localhost:3000           # every page × role
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Postgres connection (Supabase pooler, transaction mode) |
+| `DATABASE_URL` | Postgres connection (Supabase pooler, **session** mode, port 5432) |
 | `AUTH_SECRET` | ≥32 chars, signs session JWTs |
 | `APP_ENCRYPTION_KEY` | 32-byte base64 AES-256-GCM key for citizen DOB/address |
 | `CRON_SECRET` | protects `/api/cron/sla` (Vercel Cron, daily) |
