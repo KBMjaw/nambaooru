@@ -559,7 +559,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id);
 CREATE OR REPLACE FUNCTION audit_logs_immutable() RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION 'audit_logs is append-only';
-END; $$ LANGUAGE plpgsql;
+END; $$ LANGUAGE plpgsql SET search_path = '';
 
 DROP TRIGGER IF EXISTS trg_audit_immutable ON audit_logs;
 CREATE TRIGGER trg_audit_immutable BEFORE UPDATE OR DELETE ON audit_logs
@@ -568,7 +568,7 @@ CREATE TRIGGER trg_audit_immutable BEFORE UPDATE OR DELETE ON audit_logs
 CREATE OR REPLACE FUNCTION status_history_immutable() RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION 'complaint_status_history is append-only';
-END; $$ LANGUAGE plpgsql;
+END; $$ LANGUAGE plpgsql SET search_path = '';
 
 DROP TRIGGER IF EXISTS trg_csh_immutable ON complaint_status_history;
 CREATE TRIGGER trg_csh_immutable BEFORE UPDATE OR DELETE ON complaint_status_history
@@ -611,3 +611,10 @@ BEGIN
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
   END LOOP;
 END $$;
+
+-- Optional: dedicated application login role (run as the database owner; see README)
+-- CREATE ROLE nambaooru_app LOGIN PASSWORD '...' BYPASSRLS;
+-- GRANT USAGE ON SCHEMA public TO nambaooru_app;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO nambaooru_app;
+-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO nambaooru_app;
+-- REVOKE UPDATE, DELETE ON audit_logs, complaint_status_history FROM nambaooru_app;
