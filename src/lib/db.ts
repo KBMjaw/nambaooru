@@ -8,7 +8,10 @@ function create(): Sql {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not configured');
   return postgres(url, {
-    max: process.env.VERCEL ? 3 : 10,
+    max: process.env.VERCEL ? 5 : 10,
+    // Supavisor/PgBouncer transaction pooling does not reliably support pipelined queries:
+    // keep exactly one in-flight query per connection.
+    ...({ max_pipeline: 1 } as object),
     idle_timeout: 20,
     connect_timeout: 15,
     prepare: false, // required for PgBouncer / Supavisor transaction pooling

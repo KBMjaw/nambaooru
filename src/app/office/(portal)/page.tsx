@@ -10,14 +10,12 @@ import { BarList } from '@/components/charts';
 import { ComplaintsMap } from '@/components/office/ComplaintsMap';
 import { ComplaintsTable } from '@/components/office/ComplaintsTable';
 import { FieldHome } from './FieldHome';
-import { slaSweep } from '@/lib/sla';
 
 export default async function OfficeHome() {
   const u = await requirePageUser('OFFICE');
   const { t, lang } = await getT();
   if (u.role === 'FIELD_STAFF') return <FieldHome />;
 
-  void slaSweep().catch(() => {}); // opportunistic SLA notifications (cron also runs daily)
   const counts = await bucketCounts(u);
   const [dept] = u.departmentId ? await sql`SELECT name_en, name_ta FROM departments WHERE id = ${u.departmentId}` : [];
   const [ward] = u.wardId ? await sql`SELECT ward_number FROM wards WHERE id = ${u.wardId}` : [];
