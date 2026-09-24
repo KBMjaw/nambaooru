@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --color-leaf-50: #eef8f0;
+  --color-leaf-100: #d6efdb;
+  --color-leaf-500: #2e9a47;
+  --color-leaf-600: #1f7a3a;
+  --color-leaf-700: #17602d;
+  --color-leaf-800: #104520;
+  --color-navy-50: #eef3fb;
+  --color-navy-100: #d7e2f5;
+  --color-navy-500: #2957a4;
+  --color-navy-600: #1d4589;
+  --color-navy-700: #173a7a;
+  --color-navy-800: #0f2956;
+  --color-pin-500: #e53935;
+  --color-pin-600: #c62828;
+  --color-sun-400: #f7c948;
+  --color-sun-500: #f5b400;
+  --font-sans: var(--font-noto-tamil), var(--font-noto), system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: #f6f8f5;
+  color: #1b2430;
+  font-family: var(--font-sans);
+  line-height: 1.55;
+}
+
+/* Tamil script needs a touch more line-height and never too small */
+:lang(ta) body, [lang="ta"] {
+  line-height: 1.7;
+}
+
+.focus-ring {
+  @apply focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-navy-500/30;
+}
+
+.card {
+  @apply rounded-2xl bg-white border border-slate-200/80 shadow-sm;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-navy-500/30 select-none;
+}
+.btn-primary { @apply bg-leaf-600 text-white hover:bg-leaf-700 active:bg-leaf-800; }
+.btn-navy { @apply bg-navy-700 text-white hover:bg-navy-800; }
+.btn-danger { @apply bg-pin-600 text-white hover:bg-pin-500; }
+.btn-ghost { @apply bg-transparent text-navy-700 hover:bg-navy-50; }
+.btn-outline { @apply border border-slate-300 bg-white text-slate-800 hover:bg-slate-50; }
+.btn-lg { @apply px-6 py-4 text-lg rounded-2xl; }
+.btn-sm { @apply px-3 py-1.5 text-sm rounded-lg; }
+
+.input {
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-base text-slate-900 placeholder:text-slate-400 focus:border-navy-500 focus:outline-none focus:ring-4 focus:ring-navy-500/15 disabled:bg-slate-100;
+}
+.label {
+  @apply mb-1.5 block text-sm font-semibold text-slate-700;
+}
+.badge {
+  @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap;
+}
+.table-std { @apply w-full text-sm; }
+.table-std th { @apply bg-slate-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200; }
+.table-std td { @apply px-3 py-2.5 border-b border-slate-100 align-top; }
+.table-std tr:hover td { @apply bg-slate-50/60; }
+
+.leaflet-container { font-family: inherit; }
+.nu-marker { border-radius: 9999px; border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; font-size: 14px; }
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.mic-pulse::before {
+  content: '';
+  position: absolute; inset: 0; border-radius: 9999px;
+  background: var(--color-pin-500);
+  animation: pulse-ring 1.2s ease-out infinite;
+}
