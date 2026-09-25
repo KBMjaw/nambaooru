@@ -5,6 +5,15 @@ import { audit } from '@/lib/audit';
 import { badRequest, forbidden, notFound, conflict } from '@/lib/errors';
 import { ENTITIES, type Col, type Entity } from '@/lib/master';
 
+const LOCATION = new Set(['states', 'districts', 'taluks', 'blocks', 'local_body_types', 'local_bodies', 'streets', 'pincodes', 'post_offices', 'postal_locations', 'postal_location_jurisdictions']);
+/** Business audit codes for generic master-data writes. */
+function auditCode(name: string, op: 'CREATED' | 'UPDATED') {
+  if (name === 'wards') return `WARD_${op}`;
+  if (name === 'departments') return `DEPARTMENT_${op}`;
+  if (LOCATION.has(name)) return `LOCATION_${op}`;
+  return `MASTER_DATA_${op}`;
+}
+
 type Ctx = { params: Promise<{ entity: string }> };
 
 async function ctx(req: Request, params: Ctx['params'], write: boolean) {
@@ -12,7 +21,8 @@ async function ctx(req: Request, params: Ctx['params'], write: boolean) {
   const name = (await params).entity;
   const e = ENTITIES[name];
   if (!e) throw notFound();
-  if (!has(u, e.perm) && !(has(u, 'user.manage.all') && !write)) throw forbidden();
+  const ok = has(u, e.perm) || (e.perm === 'department.manage' && has(u, 'masterdata.manage')) || (name === 'wards' && has(u, 'ward.manage') && has(u, 'location.manage'));
+  if (!ok && !(has(u, 'user.manage.all') && !write)) throw forbidden();
   return { u, e, name };
 }
 
@@ -84,7 +94,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const v = values(e, body, true);
   try {
     const [row] = await sql`INSERT INTO ${sql(e.table)} ${sql(v)} RETURNING *`;
-    await audit(u, { action: `master.${name}.create`, entityType: name, entityId: String(row[e.pk]), newValue: v });
+    await audit(u, { action: auditCode(name, 'CREATED'), entityType: name, entityId: String(row[e.pk]), newValue: v });
     return { ok: true, row };
   } catch (err) {
     if ((err as { code?: string }).code === '23505') throw conflict('A record with the same key already exists');
@@ -106,7 +116,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
   try {
     const [row] = await sql`UPDATE ${sql(e.table)} SET ${sql(v)} WHERE ${sql(e.pk)} = ${pk} RETURNING *`;
     const oldVals = Object.fromEntries(Object.keys(v).map((k) => [k, old[k]]));
-    await audit(u, { action: `master.${name}.update`, entityType: name, entityId: String(id), oldValue: oldVals, newValue: v });
+    await audit(u, { action: auditCode(name, 'UPDATED'), entityType: name, entityId: String(id), oldValue: oldVals, newValue: v });
     return { ok: true, row };
   } catch (err) {
     if ((err as { code?: string }).code === '23505') throw conflict('A record with the same key already exists');

@@ -43,6 +43,34 @@ local body, and tracks inspection → assignment → work → verification → c
 
 Chennimalai Town Panchayat (Erode) is the pilot; nothing is hard-coded to it (a second local body, Perundurai, demonstrates isolation).
 
+## Administration, RBAC & jurisdiction (migration 002)
+
+- **USER → ROLE → PERMISSIONS → JURISDICTION.** Roles are rows in `roles` (built-in or custom such as JE, Electrician,
+  Plumber, EB Lineman), each with a default scope (`SYSTEM`, `DISTRICT`, `LOCAL_BODY`, `DEPARTMENT`, `WARD`, `ASSIGNED`, `OWN`)
+  and an authority rank. Permissions come from `role_permissions` plus per-user GRANT/DENY overrides (`user_permissions`).
+  Jurisdiction comes from `user_jurisdictions` (primary + additional grants; revoked rows are kept as history).
+  Everything is enforced server-side in `src/lib/scope.ts` and `src/lib/users.ts`.
+- **Super Admin protection.** Only a holder of `user.manage.all` (Super Admin) can create, edit, reset, deactivate or change
+  the role of a Super Admin; nobody can manage a peer or higher rank; security permissions stay with Super Admin.
+- **Passwords.** bcrypt hashes only. Admin-created users and admin resets get a one-time temporary password and must set
+  their own at first login (`must_change_password`). Audit rows record `PASSWORD_CHANGED` / `PASSWORD_RESET` with the source,
+  never any password value (`redact()` strips secret-looking keys from every audit payload).
+- **Audit vs security log.** Business events (`USER_CREATED`, `ROLE_CHANGED`, `JURISDICTION_CHANGED`, `COMPLAINT_ASSIGNED`,
+  `ACTION_UPDATED`, `WARD_MAP_UPDATED` …) go to `audit_logs`; logins, failures, lockouts and logouts go to `security_logs`.
+  Both are append-only (DB triggers).
+- **Bulk users.** `/admin/users/bulk` — CSV or Excel template (with live reference lists), row-level validation, all-or-nothing
+  or valid-rows-only import inside one transaction with a savepoint per row (`src/lib/bulk-users.ts`).
+- **Locations.** `/admin/local-bodies/new` creates a local body with controlling authority, responsible officer, departments
+  and N generated wards; wards carry population / description / street count; `/…/ward-maps/[ward]` draws GeoJSON features.
+- **Complaint actions.** `complaint_actions` with primary + supporting assignees and an append-only update log; complaint work
+  assignments also support supporting assignees.
+
+Apply the migration with `npm run db:migrate` (runs `db/schema.sql` then `db/migrations/*.sql`, all idempotent) followed by
+`npm run db:seed`. Demo passwords can be set from a local, git-ignored JSON file:
+`PASSWORDS_FILE=path.json node --experimental-strip-types scripts/db.ts set-passwords`.
+
+Tests: `npm test` (NLP), `node tests/e2e.mjs`, `node tests/admin-e2e.mjs`, `node tests/smoke-pages.mjs` against a running server.
+
 ## Local development
 
 ```bash

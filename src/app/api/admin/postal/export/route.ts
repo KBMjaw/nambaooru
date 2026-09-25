@@ -16,6 +16,6 @@ export const GET = route(async () => {
     ORDER BY p.district_name, p.place_name`;
   const header = ['Place', 'Pincode', 'District', 'District (normalised)', 'Taluk', 'Status', 'Source', 'Mapped local bodies'];
   const csv = [header.join(','), ...rows.map((r) => [r.place_name, r.pincode, r.district_name, r.district_normalised, r.taluk, r.status, r.source, r.mapped_local_bodies].map(esc).join(','))].join('\n');
-  await audit(u, { action: 'master.postal.export', entityType: 'postal_locations', newValue: { rows: rows.length } });
+  await audit(u, { action: 'POSTAL_EXPORT', entityType: 'postal_locations', newValue: { rows: rows.length } });
   return new Response('﻿' + csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="tn_postal_locations_export.csv"' } });
 });

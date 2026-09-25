@@ -2,24 +2,27 @@ import { z } from 'zod';
 import { route, body } from '@/lib/api';
 import { sql } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth';
-import { audit } from '@/lib/audit';
-import { forbidden, badRequest } from '@/lib/errors';
+import { RoleInput, createRole, togglePermission, canEditRole } from '@/lib/roles';
 
-const CITIZEN_PERMS = ['complaint.create', 'complaint.view.own', 'appeal.create'];
+const PERMS = ['role.manage', 'role.custom.manage'];
 
-/** Configure role permissions. Super Admin row is locked; security permissions stay with Super Admin only. */
+export const GET = route(async () => {
+  const u = await requireApiUser('ADMIN', PERMS);
+  const roles = await sql`SELECT r.*, (SELECT count(*) FROM users x WHERE x.role_id = r.id AND x.status = 'ACTIVE')::int AS active_users,
+                                 COALESCE((SELECT array_agg(p.code) FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = r.id), '{}') AS permissions
+                          FROM roles r ORDER BY r.rank DESC, r.name_en`;
+  return { roles: roles.map((r) => ({ ...r, editable: canEditRole(u, r as never) })) };
+});
+
+/** Create a custom operational role. */
 export const POST = route(async (req) => {
-  const u = await requireApiUser('ADMIN', 'role.manage');
+  const u = await requireApiUser('ADMIN', PERMS);
+  return createRole(u, await body(req, RoleInput));
+});
+
+/** Toggle one permission of one role (permission matrix). */
+export const PUT = route(async (req) => {
+  const u = await requireApiUser('ADMIN', PERMS);
   const d = await body(req, z.object({ role: z.string(), permission: z.string(), granted: z.boolean() }));
-  const [role] = await sql`SELECT id, code FROM roles WHERE code = ${d.role}`;
-  const [perm] = await sql`SELECT id, code, is_security FROM permissions WHERE code = ${d.permission}`;
-  if (!role || !perm) throw badRequest('Unknown role or permission');
-  if (role.code === 'SUPER_ADMIN') throw forbidden('Super Admin permissions are fixed');
-  if (d.granted && perm.is_security) throw forbidden('Security permissions can only be held by Super Admin');
-  if (role.code === 'CITIZEN' && d.granted && !CITIZEN_PERMS.includes(perm.code as string)) throw forbidden('Citizens cannot receive official permissions');
-  if (role.code !== 'CITIZEN' && d.granted && CITIZEN_PERMS.includes(perm.code as string)) throw forbidden('Citizen-only permission');
-  if (d.granted) await sql`INSERT INTO role_permissions (role_id, permission_id) VALUES (${role.id}, ${perm.id}) ON CONFLICT DO NOTHING`;
-  else await sql`DELETE FROM role_permissions WHERE role_id = ${role.id} AND permission_id = ${perm.id}`;
-  await audit(u, { action: d.granted ? 'role.permission_grant' : 'role.permission_revoke', entityType: 'role', entityId: role.code as string, newValue: { permission: perm.code } });
-  return { ok: true };
+  return togglePermission(u, d.role, d.permission, d.granted);
 });

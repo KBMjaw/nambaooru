@@ -7,4 +7,4 @@ export const unauthorized = () => new HttpError(401, 'UNAUTHORIZED', 'Please log
 export const forbidden = (m = 'You are not allowed to perform this action') => new HttpError(403, 'FORBIDDEN', m);
 export const notFound = (m = 'Not found') => new HttpError(404, 'NOT_FOUND', m);
 export const badRequest = (m: string, details?: unknown) => new HttpError(400, 'BAD_REQUEST', m, details);
-export const conflict = (m: string) => new HttpError(409, 'CONFLICT', m);
+export const conflict = (m: string, details?: unknown) => new HttpError(409, 'CONFLICT', m, details);

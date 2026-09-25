@@ -1,11 +1,12 @@
 /**
  * Database CLI.
- *   node --experimental-strip-types scripts/db.ts migrate        # apply db/schema.sql
+ *   node --experimental-strip-types scripts/db.ts migrate        # apply db/schema.sql + db/migrations/*.sql (idempotent)
  *   node --experimental-strip-types scripts/db.ts seed           # reference data + postal dataset + pilot mappings
  *   node --experimental-strip-types scripts/db.ts bootstrap      # create Super Admin + demo officials (prints generated passwords once)
+ *   PASSWORDS_FILE=path.json node ... scripts/db.ts set-passwords  # set passwords from a local JSON {username: password} (never committed)
  * Requires DATABASE_URL (and DATABASE_SSL=disable for local Postgres).
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
@@ -16,6 +17,25 @@ const sql = postgres(process.env.DATABASE_URL!, { ssl: process.env.DATABASE_SSL 
 async function migrate() {
   await sql.unsafe(readFileSync('db/schema.sql', 'utf8'));
   console.log('✔ schema applied');
+  for (const f of readdirSync('db/migrations').filter((x) => x.endsWith('.sql')).sort()) {
+    await sql.unsafe(readFileSync(`db/migrations/${f}`, 'utf8'));
+    console.log(`✔ migration ${f}`);
+  }
+}
+
+/** Set account passwords from a local, git-ignored JSON file. Only bcrypt hashes are stored. */
+async function setPasswords() {
+  const file = process.env.PASSWORDS_FILE;
+  if (!file) throw new Error('PASSWORDS_FILE is required');
+  const map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
+  for (const [username, pw] of Object.entries(map)) {
+    const r = await sql`UPDATE users SET password_hash = ${bcrypt.hashSync(pw, 12)}, password_changed_at = now(), must_change_password = false,
+                          token_version = token_version + 1, failed_logins = 0, locked_until = NULL WHERE lower(username) = ${username.toLowerCase()} RETURNING id`;
+    if (!r.length) { console.log(`✘ ${username}: not found`); continue; }
+    await sql`INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, target_user_id, new_value)
+              VALUES (NULL, 'SYSTEM', 'PASSWORD_CHANGED', 'user', ${r[0].id}, ${r[0].id}, ${sql.json({ source: 'SYSTEM_BOOTSTRAP' })})`;
+    console.log(`✔ ${username}`);
+  }
 }
 
 export async function pilotMappings() {
@@ -86,7 +106,7 @@ async function bootstrap() {
     const supId = supervisor ? (await sql`SELECT id FROM users WHERE username = ${supervisor as string}`)[0]?.id : null;
     await sql`INSERT INTO officials ${sql({ user_id: u.id, designation: null, employee_id: null, department_id: null, local_body_id: null, ward_id: null, jurisdiction: null, ...o, supervisor_id: supId ?? null } as Record<string, unknown>)}`;
     await sql`INSERT INTO audit_logs (actor_id, actor_role, action, entity_type, entity_id, target_user_id, new_value)
-              VALUES (NULL, 'SYSTEM', 'user.bootstrap', 'user', ${u.id}, ${u.id}, ${sql.json({ username: a.username, role: a.role })})`;
+              VALUES (NULL, 'SYSTEM', 'USER_CREATED', 'user', ${u.id}, ${u.id}, ${sql.json({ username: a.username, role: a.role })})`;
     creds[a.username] = pw;
   }
   if (Object.keys(creds).length) {
@@ -100,9 +120,10 @@ const cmd = process.argv[2];
 try {
   if (cmd === 'migrate') await migrate();
   else if (cmd === 'seed') await seed();
-  else if (cmd === 'bootstrap') await bootstrap();
-  else if (cmd === 'all') { await migrate(); await seed(); await bootstrap(); }
-  else console.log('usage: migrate | seed | bootstrap | all');
+  else if (cmd === 'bootstrap') { await bootstrap(); await migrate(); /* backfills role history + jurisdictions */ }
+  else if (cmd === 'set-passwords') await setPasswords();
+  else if (cmd === 'all') { await migrate(); await seed(); await bootstrap(); await migrate(); }
+  else console.log('usage: migrate | seed | bootstrap | set-passwords | all');
 } finally {
   await sql.end();
 }

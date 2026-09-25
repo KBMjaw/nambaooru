@@ -12,15 +12,15 @@ ON CONFLICT (code) DO NOTHING;
 -- ---------------------------------------------------------------------------
 -- Roles & permissions
 -- ---------------------------------------------------------------------------
-INSERT INTO roles (code, name_en, name_ta, portal, rank) VALUES
-  ('SUPER_ADMIN',  'Super Admin',                'முதன்மை நிர்வாகி',          'ADMIN',  100),
-  ('SYSTEM_ADMIN', 'System / Technology Admin',  'தொழில்நுட்ப நிர்வாகி',       'ADMIN',   90),
-  ('EO',           'Executive Officer',          'செயல் அலுவலர்',             'OFFICE',  80),
-  ('SUPERVISOR',   'Supervisor',                 'மேற்பார்வையாளர்',           'OFFICE',  60),
-  ('DEPT_OFFICER', 'Department Officer',         'துறை அலுவலர்',              'OFFICE',  60),
-  ('FIELD_STAFF',  'Field Staff / Worker',       'களப் பணியாளர்',             'OFFICE',  30),
-  ('WARD_MEMBER',  'Ward Member / Representative','வார்டு உறுப்பினர்',         'OFFICE',  40),
-  ('CITIZEN',      'Citizen',                    'குடிமகன்',                  'PUBLIC',  10)
+INSERT INTO roles (code, name_en, name_ta, portal, rank, default_scope, description) VALUES
+  ('SUPER_ADMIN',  'Super Admin',                'முதன்மை நிர்வாகி',          'ADMIN',  100, 'SYSTEM',     'System-wide highest authority'),
+  ('SYSTEM_ADMIN', 'Admin (System Admin)',       'நிர்வாகி',                  'ADMIN',   90, 'SYSTEM',     'Operational administration across the state; cannot manage Super Admin'),
+  ('EO',           'Executive Officer',          'செயல் அலுவலர்',             'OFFICE',  80, 'LOCAL_BODY', 'Head of a local body'),
+  ('SUPERVISOR',   'Supervisor',                 'மேற்பார்வையாளர்',           'OFFICE',  60, 'DEPARTMENT', 'Supervises a department''s field work'),
+  ('DEPT_OFFICER', 'Department Officer',         'துறை அலுவலர்',              'OFFICE',  60, 'DEPARTMENT', 'Officer in charge of a department'),
+  ('FIELD_STAFF',  'Field Staff / Worker',       'களப் பணியாளர்',             'OFFICE',  30, 'ASSIGNED',   'Does the assigned field work'),
+  ('WARD_MEMBER',  'Ward Member / Representative','வார்டு உறுப்பினர்',         'OFFICE',  40, 'WARD',       'Elected ward representative'),
+  ('CITIZEN',      'Citizen',                    'குடிமகன்',                  'PUBLIC',  10, 'OWN',        'Resident filing complaints')
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO permissions (code, description, is_security) VALUES
@@ -91,13 +91,81 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM m JOIN roles r ON r.code = m.role_code JOIN permissions p ON p.code = m.perm_code
 ON CONFLICT DO NOTHING;
 
--- Super Admin gets every permission EXCEPT complaint mutations (cannot casually modify official records).
+-- ---------------------------------------------------------------------------
+-- Granular permissions added in the admin / RBAC / jurisdiction upgrade (migration 002)
+-- ---------------------------------------------------------------------------
+INSERT INTO permissions (code, description, is_security) VALUES
+  ('citizen.view',        'View citizen profiles and complaint history in jurisdiction', false),
+  ('citizen.manage',      'Create / edit / deactivate citizen accounts in jurisdiction', false),
+  ('user.password_reset', 'Reset passwords of manageable users (temporary password, forced change)', false),
+  ('user.bulk_upload',    'Bulk create users from CSV / Excel', false),
+  ('role.custom.manage',  'Create and edit operational (custom) roles and their permissions', false),
+  ('permission.manage',   'Grant / deny individual permissions to manageable users', false),
+  ('ward.manage',         'Create and edit wards and streets in jurisdiction', false),
+  ('department.manage',   'Create and edit departments', false),
+  ('wardmap.view',        'View ward maps', false),
+  ('wardmap.edit',        'Draw and edit ward map features in jurisdiction', false),
+  ('action.create',       'Add work actions to complaints', false),
+  ('action.edit',         'Edit, assign, reassign and cancel complaint actions', false),
+  ('evidence.upload',     'Upload evidence for assigned work', false),
+  ('complaint.reopen',    'Reopen a closed complaint with a reason', false),
+  ('audit.manage',        'Export audit logs and view the authentication / security log', true)
+ON CONFLICT (code) DO NOTHING;
+
+-- Spec-style labels and UI groups for every permission
+UPDATE permissions p SET label = v.label, perm_group = v.grp FROM (VALUES
+  ('complaint.create','CREATE_COMPLAINT','Citizen'),('complaint.view.own','VIEW_OWN_COMPLAINTS','Citizen'),('appeal.create','CREATE_APPEAL','Citizen'),
+  ('complaint.view.all','VIEW_COMPLAINTS (all)','Complaints'),('complaint.view.localbody','VIEW_COMPLAINTS (local body)','Complaints'),
+  ('complaint.view.department','VIEW_COMPLAINTS (department)','Complaints'),('complaint.view.ward','VIEW_COMPLAINTS (ward)','Complaints'),
+  ('complaint.view.assigned','VIEW_COMPLAINTS (assigned)','Complaints'),('complaint.review','REVIEW_COMPLAINT','Complaints'),
+  ('complaint.schedule_inspection','SCHEDULE_INSPECTION','Complaints'),('complaint.inspect','INSPECT_COMPLAINT','Complaints'),
+  ('complaint.assign','ASSIGN_COMPLAINT','Complaints'),('complaint.reassign','REASSIGN_COMPLAINT','Complaints'),
+  ('complaint.escalate','ESCALATE_COMPLAINT','Complaints'),('complaint.reject','REJECT_COMPLAINT','Complaints'),
+  ('complaint.work','UPDATE_PROGRESS','Work'),('evidence.upload','UPLOAD_EVIDENCE','Work'),('action.create','ADD_ACTION','Work'),('action.edit','EDIT_ACTION','Work'),
+  ('complaint.verify','VERIFY_COMPLETION','Complaints'),('complaint.close','CLOSE_COMPLAINT','Complaints'),('complaint.reopen','REOPEN_COMPLAINT','Complaints'),
+  ('complaint.remark','ADD_REMARK','Complaints'),('appeal.review','REVIEW_APPEALS','Complaints'),
+  ('citizen.pii.view','VIEW_CITIZEN_CONTACT','Citizens'),('citizen.view','VIEW_CITIZENS','Citizens'),('citizen.manage','MANAGE_CITIZENS','Citizens'),
+  ('map.view','VIEW_MAP','Maps & analytics'),('wardmap.view','VIEW_WARD_MAPS','Maps & analytics'),('wardmap.edit','EDIT_WARD_MAPS','Maps & analytics'),
+  ('analytics.view','VIEW_ANALYTICS','Maps & analytics'),
+  ('audit.view','VIEW_AUDIT_LOGS','Audit'),('audit.manage','MANAGE_AUDIT_LOGS','Audit'),
+  ('user.view','VIEW_USERS','Users'),('user.manage','MANAGE_USERS','Users'),('user.manage.all','MANAGE_ALL_USERS (incl. Super Admin)','Users'),
+  ('user.password_reset','RESET_PASSWORD','Users'),('user.bulk_upload','BULK_UPLOAD_USERS','Users'),
+  ('role.custom.manage','MANAGE_ROLES','Roles & permissions'),('permission.manage','MANAGE_PERMISSIONS','Roles & permissions'),
+  ('role.manage','MANAGE_SYSTEM_ROLES','Roles & permissions'),
+  ('location.manage','MANAGE_LOCATIONS','Master data'),('ward.manage','MANAGE_WARDS','Master data'),('department.manage','MANAGE_DEPARTMENTS','Master data'),
+  ('masterdata.manage','MANAGE_MASTER_DATA','Master data'),('language.manage','MANAGE_LANGUAGES','Master data'),
+  ('settings.manage','MANAGE_SYSTEM_SETTINGS','System'),('ai.configure','CONFIGURE_AI','System')
+) AS v(code, label, grp) WHERE p.code = v.code AND (p.label IS DISTINCT FROM v.label OR p.perm_group IS DISTINCT FROM v.grp);
+
+WITH m(role_code, perm_code) AS (VALUES
+  -- Admin: operational management system-wide, never Super Admin / security permissions
+  ('SYSTEM_ADMIN','user.manage'),('SYSTEM_ADMIN','user.password_reset'),('SYSTEM_ADMIN','user.bulk_upload'),
+  ('SYSTEM_ADMIN','citizen.view'),('SYSTEM_ADMIN','citizen.manage'),('SYSTEM_ADMIN','citizen.pii.view'),
+  ('SYSTEM_ADMIN','role.custom.manage'),('SYSTEM_ADMIN','permission.manage'),('SYSTEM_ADMIN','ward.manage'),('SYSTEM_ADMIN','department.manage'),
+  ('SYSTEM_ADMIN','wardmap.view'),('SYSTEM_ADMIN','wardmap.edit'),
+  ('SYSTEM_ADMIN','complaint.assign'),('SYSTEM_ADMIN','complaint.reassign'),('SYSTEM_ADMIN','complaint.remark'),
+  ('SYSTEM_ADMIN','action.create'),('SYSTEM_ADMIN','action.edit'),('SYSTEM_ADMIN','complaint.reopen'),
+  -- EO: local body wide
+  ('EO','citizen.view'),('EO','citizen.manage'),('EO','user.password_reset'),('EO','ward.manage'),('EO','wardmap.view'),('EO','wardmap.edit'),
+  ('EO','action.create'),('EO','action.edit'),('EO','complaint.reopen'),('EO','evidence.upload'),
+  ('SUPERVISOR','action.create'),('SUPERVISOR','action.edit'),('SUPERVISOR','evidence.upload'),('SUPERVISOR','wardmap.view'),
+  ('DEPT_OFFICER','action.create'),('DEPT_OFFICER','action.edit'),('DEPT_OFFICER','evidence.upload'),('DEPT_OFFICER','wardmap.view'),
+  ('FIELD_STAFF','evidence.upload'),
+  ('WARD_MEMBER','wardmap.view')
+)
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM m JOIN roles r ON r.code = m.role_code JOIN permissions p ON p.code = m.perm_code
+ON CONFLICT DO NOTHING;
+
+-- Super Admin holds every permission except citizen-only ones and the field / verification decisions that
+-- belong to the local body's officials (review, inspect, reject, work, verify, close, escalate, appeals).
+-- Assignment, actions and reopening are allowed so the Super Admin can intervene, and every change is audited.
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
 WHERE r.code = 'SUPER_ADMIN'
   AND p.code NOT IN ('complaint.create','complaint.view.own','appeal.create','complaint.review','complaint.schedule_inspection',
-                     'complaint.inspect','complaint.assign','complaint.reassign','complaint.reject','complaint.work',
-                     'complaint.verify','complaint.close','complaint.remark','complaint.escalate','appeal.review',
+                     'complaint.inspect','complaint.reject','complaint.work','evidence.upload',
+                     'complaint.verify','complaint.close','complaint.escalate','appeal.review',
                      'complaint.view.localbody','complaint.view.department','complaint.view.ward','complaint.view.assigned')
 ON CONFLICT DO NOTHING;
 

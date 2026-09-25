@@ -21,6 +21,6 @@ export const POST = route(async (req) => {
     fileName: file.name.slice(0, 200),
     importedBy: u.id,
   });
-  await audit(u, { action: 'master.postal.import', entityType: 'data_source', entityId: String(result.sourceId), newValue: { ...result, errors: result.errors.length } });
+  await audit(u, { action: 'POSTAL_IMPORT', entityType: 'data_source', entityId: String(result.sourceId), newValue: { ...result, errors: result.errors.length } });
   return result;
 });

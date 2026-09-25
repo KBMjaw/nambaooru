@@ -108,7 +108,7 @@ export const POST = route(async (req) => {
     await storeEvidence(complaintId, 'CITIZEN', files[i], u.id, { ...m, latitude: m.latitude ?? p.latitude, longitude: m.longitude ?? p.longitude, accuracy: m.accuracy ?? p.accuracy });
   }
 
-  await audit(u, { action: 'complaint.create', entityType: 'complaint', entityId: code, newValue: { category: cat.code, localBodyId: lb.id, wardId: ward?.id ?? null, priority, evidence: files.length, duplicateOverride: p.duplicateOverride } });
+  await audit(u, { action: 'COMPLAINT_CREATED', entityType: 'complaint', entityId: code, newValue: { category: cat.code, localBodyId: lb.id, wardId: ward?.id ?? null, priority, evidence: files.length, duplicateOverride: p.duplicateOverride } });
   await notify(u.id, 'SUBMITTED', { code, category_en: cat.name_en as string, category_ta: cat.name_ta as string }, complaintId);
 
   // AI classification step (system actor) — suggestion only; officials review next.

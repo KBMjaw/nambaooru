@@ -1,11 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { useI18n } from '@/i18n/client';
-import { trMsg, type MessageKey } from '@/i18n';
+import { trMsg } from '@/i18n';
 import { api } from '@/lib/client-api';
 import { Alert } from '@/components/ui';
 
-export function RoleMatrix({ roles, perms, grants }: { roles: { code: string }[]; perms: { code: string; description: string; is_security: boolean }[]; grants: string[] }) {
+export function RoleMatrix({ roles, perms, grants }: { roles: { code: string; name: string }[]; perms: { code: string; label: string | null; description: string; is_security: boolean }[]; grants: string[] }) {
   const { t } = useI18n();
   const [g, setG] = useState(new Set(grants));
   const [err, setErr] = useState<string | null>(null);
@@ -14,7 +14,7 @@ export function RoleMatrix({ roles, perms, grants }: { roles: { code: string }[]
     const granted = !g.has(key);
     setErr(null);
     try {
-      await api('/api/admin/roles', { body: { role, permission: perm, granted } });
+      await api('/api/admin/roles', { method: 'PUT', body: { role, permission: perm, granted } });
       setG((s) => { const n = new Set(s); if (granted) n.add(key); else n.delete(key); return n; });
     } catch (e) { setErr(trMsg(t, (e as Error).message)); }
   }
@@ -23,13 +23,13 @@ export function RoleMatrix({ roles, perms, grants }: { roles: { code: string }[]
       {err && <Alert tone="error">{err}</Alert>}
       <div className="card overflow-x-auto">
         <table className="table-std">
-          <thead><tr><th>Permission</th>{roles.map((r) => <th key={r.code} className="text-center">{t(`role.${r.code}` as MessageKey)}</th>)}</tr></thead>
+          <thead><tr><th>Permission</th>{roles.map((r) => <th key={r.code} className="text-center text-xs">{r.name}</th>)}</tr></thead>
           <tbody>
             {perms.map((p) => (
               <tr key={p.code}>
-                <td><code className="text-xs font-bold">{p.code}</code>{p.is_security && <span className="ml-1 badge bg-red-100 text-red-700">security</span>}<div className="text-xs text-slate-500">{p.description}</div></td>
+                <td><b className="text-xs">{p.label ?? p.code}</b> <code className="text-[10px] text-slate-400">{p.code}</code>{p.is_security && <span className="ml-1 badge bg-red-100 text-red-700">security</span>}<div className="text-xs text-slate-500">{p.description}</div></td>
                 {roles.map((r) => {
-                  const locked = r.code === 'SUPER_ADMIN';
+                  const locked = r.code === 'SUPER_ADMIN' || (p.is_security && r.code !== 'SUPER_ADMIN');
                   return (
                     <td key={r.code} className="text-center">
                       <input type="checkbox" className="h-4 w-4" aria-label={`${r.code} ${p.code}`} checked={g.has(`${r.code}|${p.code}`)} disabled={locked} onChange={() => toggle(r.code, p.code)} />

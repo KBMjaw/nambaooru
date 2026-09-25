@@ -17,13 +17,15 @@ async function check(cookie, path, expect, label) {
 }
 const code = process.env.CODE;
 const sa = await login('ADMIN', 'superadmin', creds.superadmin);
-for (const p of ['/admin', '/admin/complaints', '/admin/users', '/admin/roles', '/admin/locations', '/admin/locations?tab=wards', '/admin/postal', '/admin/postal?tab=sources', '/admin/postal?tab=postal_location_jurisdictions', '/admin/departments', '/admin/categories', '/admin/sla', '/admin/routing', '/admin/templates', '/admin/settings', '/admin/audit', '/admin/profile', ...(code ? [`/admin/complaints/${code}`] : [])]) await check(sa, p, 200, 'superadmin');
+for (const p of ['/admin', '/admin/complaints', '/admin/users', '/admin/roles', '/admin/locations', '/admin/locations?tab=wards', '/admin/postal', '/admin/postal?tab=sources', '/admin/postal?tab=postal_location_jurisdictions', '/admin/departments', '/admin/categories', '/admin/sla', '/admin/routing', '/admin/templates', '/admin/settings', '/admin/audit', '/admin/audit?tab=security', '/admin/citizens', '/admin/local-bodies', '/admin/ward-maps', '/admin/users/bulk', '/admin/profile', ...(code ? [`/admin/complaints/${code}`] : [])]) await check(sa, p, 200, 'superadmin');
 for (const p of ['/api/admin/master/districts?refs=1', '/api/admin/master/local_bodies?refs=1', '/api/admin/master/postal_locations?q=638051', '/api/admin/postal/export']) await check(sa, p, 200, 'superadmin api');
 const sys = await login('ADMIN', 'sysadmin', creds.sysadmin);
-await check(sys, '/admin/roles', 307, 'sysadmin (no role.manage)');
+await check(sys, '/admin/roles', 200, 'sysadmin (custom roles)');
+await check(sys, '/admin/roles?tab=matrix', 200, 'sysadmin (matrix tab hidden → roles)');
+for (const p of ['/admin/users/bulk', '/admin/citizens', '/admin/local-bodies', '/admin/local-bodies/new', '/admin/ward-maps', '/admin/users?status=INACTIVE', '/admin/complaints?bucket=high']) await check(sys, p, 200, 'sysadmin');
 await check(sys, '/admin/locations', 200, 'sysadmin');
 const eo = await login('OFFICE', 'eo.chennimalai', creds['eo.chennimalai']);
-for (const p of ['/office', '/office/complaints', '/office/complaints?view=map', '/office/complaints?bucket=overdue', '/office/map', '/office/analytics', '/office/appeals', '/office/users', '/office/notifications', '/office/profile', ...(code ? [`/office/complaints/${code}`] : [])]) await check(eo, p, 200, 'EO');
+for (const p of ['/office', '/office/complaints', '/office/complaints?view=map', '/office/complaints?bucket=overdue', '/office/map', '/office/analytics', '/office/appeals', '/office/users', '/office/citizens', '/office/wards', '/office/ward-maps', '/office/notifications', '/office/profile', ...(code ? [`/office/complaints/${code}`] : [])]) await check(eo, p, 200, 'EO');
 await check(eo, '/admin', 307, 'EO→admin');
 await check(eo, '/api/admin/master/districts', 401, 'EO→admin api');
 const ward = await login('OFFICE', 'ward10.member', creds['ward10.member']);

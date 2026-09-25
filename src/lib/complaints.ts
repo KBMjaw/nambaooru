@@ -46,9 +46,9 @@ export async function notifyOfficials(complaintId: number, template: string, ext
   const users = await sql`
     SELECT DISTINCT u.id FROM users u JOIN roles r ON r.id = u.role_id JOIN officials o ON o.user_id = u.id
     WHERE u.status = 'ACTIVE' AND o.local_body_id = ${c.local_body_id}
-      AND (r.code = 'EO'
-           OR (r.code IN ('SUPERVISOR','DEPT_OFFICER') AND (o.department_id = ${c.department_id} OR o.department_id IS NULL))
-           OR (${opts.includeWardMember ?? true} AND r.code = 'WARD_MEMBER' AND o.ward_id = ${c.ward_id}))`;
+      AND (r.default_scope = 'LOCAL_BODY'
+           OR (r.default_scope = 'DEPARTMENT' AND (o.department_id = ${c.department_id} OR o.department_id IS NULL))
+           OR (${opts.includeWardMember ?? true} AND r.default_scope = 'WARD' AND o.ward_id = ${c.ward_id}))`;
   for (const u of users) {
     await notify(u.id as string, template, { code: c.code as string, category_en: c.name_en as string, category_ta: c.name_ta as string, ...extra }, c.id as number);
   }

@@ -9,7 +9,7 @@ import { Alert, Spinner } from '@/components/ui';
 interface Meta { title: string; pk: string; cols: Col[]; statusCol?: { key: string; active: unknown; inactive: unknown }; filterBy?: string }
 type Row = Record<string, unknown>;
 
-export function MasterTable({ entity, parent, readOnly = false }: { entity: string; parent?: string; readOnly?: boolean }) {
+export function MasterTable({ entity, parent, readOnly = false, autoNew = false }: { entity: string; parent?: string; readOnly?: boolean; autoNew?: boolean }) {
   const { t } = useI18n();
   const [rows, setRows] = useState<Row[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -38,6 +38,8 @@ export function MasterTable({ entity, parent, readOnly = false }: { entity: stri
 
   useEffect(() => { void load(true); }, [entity]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(false); }, [page, parent]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [autoOpened, setAutoOpened] = useState(false);
+  useEffect(() => { if (autoNew && meta && !autoOpened && !readOnly) { setAutoOpened(true); open('new'); } }, [autoNew, meta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refLabel = (c: Col, v: unknown) => (v == null ? '—' : refs[c.key]?.find((x) => String(x.id) === String(v))?.label ?? String(v));
   const show = (c: Col, v: unknown) => {
@@ -152,7 +154,7 @@ export function MasterTable({ entity, parent, readOnly = false }: { entity: stri
                   {!readOnly && (
                     <td className="whitespace-nowrap">
                       <button className="btn btn-ghost btn-sm" onClick={() => open(r)}>{t('common.edit')}</button>
-                      {meta.statusCol && <button className="btn btn-ghost btn-sm" onClick={() => toggle(r)}>{r[meta.statusCol.key] === meta.statusCol.active ? '⏸ Deactivate' : '▶ Activate'}</button>}
+                      {meta.statusCol && <button className="btn btn-ghost btn-sm" onClick={() => { if (window.confirm(r[meta.statusCol!.key] === meta.statusCol!.active ? t('admin.confirmDeactivate') : t('admin.confirmActivate'))) void toggle(r); }}>{r[meta.statusCol.key] === meta.statusCol.active ? `⏸ ${t('users.deactivate')}` : `▶ ${t('users.activate')}`}</button>}
                     </td>
                   )}
                 </tr>

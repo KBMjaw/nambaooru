@@ -30,6 +30,6 @@ export const POST = route(async (req) => {
   if (!rule) throw badRequest('Setting is not editable');
   const value = rule.parse(d.value);
   await sql`UPDATE system_settings SET value = ${sql.json(value as never)}, updated_by = ${u.id}, updated_at = now() WHERE key = ${d.key}`;
-  await audit(u, { action: 'settings.update', entityType: 'system_setting', entityId: d.key, oldValue: s.value, newValue: value });
+  await audit(u, { action: 'SETTINGS_UPDATED', entityType: 'system_setting', entityId: d.key, oldValue: s.value, newValue: value });
   return { ok: true };
 });

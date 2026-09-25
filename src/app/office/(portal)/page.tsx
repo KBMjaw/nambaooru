@@ -10,17 +10,19 @@ import { BarList } from '@/components/charts';
 import { ComplaintsMap } from '@/components/office/ComplaintsMap';
 import { ComplaintsTable } from '@/components/office/ComplaintsTable';
 import { FieldHome } from './FieldHome';
+import { dashboardData } from '@/lib/dashboard';
+import { DashboardSections } from '@/components/DashboardSections';
 
 export default async function OfficeHome() {
   const u = await requirePageUser('OFFICE');
   const { t, lang } = await getT();
-  if (u.role === 'FIELD_STAFF') return <FieldHome />;
+  if (u.scope === 'ASSIGNED') return <FieldHome />;
 
   const counts = await bucketCounts(u);
   const [dept] = u.departmentId ? await sql`SELECT name_en, name_ta FROM departments WHERE id = ${u.departmentId}` : [];
   const [ward] = u.wardId ? await sql`SELECT ward_number FROM wards WHERE id = ${u.wardId}` : [];
-  const title = u.role === 'EO' ? t('office.eoTitle')
-    : u.role === 'WARD_MEMBER' ? t('office.wardTitle', { n: (ward?.ward_number as number) ?? '' })
+  const title = u.scope === 'LOCAL_BODY' ? t('office.eoTitle')
+    : u.scope === 'WARD' ? t('office.wardTitle', { n: (ward?.ward_number as number) ?? '' })
     : dept ? t('office.deptTitle', { dept: String(lang === 'ta' ? dept.name_ta : dept.name_en) }) : t('office.dashboardTitle');
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
 
@@ -59,6 +61,11 @@ export default async function OfficeHome() {
           {(appeals.n as number) > 0 && <Link href="/office/appeals"><Alert tone="info">🔁 {t('office.appealsPending')}: <b>{appeals.n as number}</b></Alert></Link>}
           {counts.conflict > 0 && <Link href="/office/complaints?conflict=1"><Alert tone="warn">📍 {t('office.locationConflict')}: <b>{counts.conflict}</b></Alert></Link>}
         </div>
+      )}
+
+      {u.scope === 'LOCAL_BODY' && (
+        <DashboardSections d={await dashboardData(u)} base="/office" showLocalBodies={false}
+          canCitizens={has(u, 'citizen.view')} canUsers={has(u, 'user.view') || has(u, 'user.manage')} />
       )}
 
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">

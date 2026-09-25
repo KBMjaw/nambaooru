@@ -18,12 +18,15 @@ export const BUCKETS: Record<string, string[]> = {
 
 export interface Filters {
   bucket?: string; ward?: string; street?: string; category?: string; status?: string; priority?: string;
-  from?: string; to?: string; staff?: string; q?: string; dept?: string; page?: string; escalated?: string; conflict?: string;
+  from?: string; to?: string; staff?: string; q?: string; dept?: string; page?: string; escalated?: string; conflict?: string; lb?: string;
 }
 
 export function filterSql(f: Filters) {
   const parts = [sql`TRUE`];
   if (f.bucket === 'overdue') parts.push(sql`c.sla_due_at < now() AND c.status NOT IN ('CLOSED','REJECTED','DUPLICATE')`);
+  else if (f.bucket === 'open') parts.push(sql`c.status NOT IN ('CLOSED','REJECTED','DUPLICATE')`);
+  else if (f.bucket === 'high') parts.push(sql`c.priority IN ('HIGH','CRITICAL') AND c.status NOT IN ('CLOSED','REJECTED','DUPLICATE')`);
+  else if (f.bucket === 'active') parts.push(sql`c.status IN ('ASSIGNED','IN_PROGRESS')`);
   else if (f.bucket && BUCKETS[f.bucket]) parts.push(sql`c.status IN ${sql(BUCKETS[f.bucket])}`);
   if (f.status) parts.push(sql`c.status = ${f.status}`);
   if (f.ward) parts.push(sql`c.ward_id = ${Number(f.ward)}`);
@@ -31,7 +34,9 @@ export function filterSql(f: Filters) {
   if (f.category) parts.push(sql`cat.code = ${f.category}`);
   if (f.priority) parts.push(sql`c.priority = ${f.priority}`);
   if (f.dept) parts.push(sql`c.department_id = ${Number(f.dept)}`);
-  if (f.staff) parts.push(sql`c.assigned_to = ${f.staff}`);
+  if (f.staff && /^[0-9a-f-]{36}$/i.test(f.staff)) parts.push(sql`(c.assigned_to = ${f.staff} OR EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.assigned_to = ${f.staff})
+    OR EXISTS (SELECT 1 FROM complaint_actions ca JOIN complaint_action_assignees x ON x.action_id = ca.id WHERE ca.complaint_id = c.id AND x.user_id = ${f.staff} AND x.removed_at IS NULL))`);
+  if (f.lb && Number(f.lb)) parts.push(sql`c.local_body_id = ${Number(f.lb)}`);
   if (f.escalated) parts.push(sql`c.escalated`);
   if (f.conflict) parts.push(sql`c.location_conflict`);
   if (f.from && /^\d{4}-\d{2}-\d{2}$/.test(f.from)) parts.push(sql`c.created_at >= ${f.from}::date`);
@@ -90,7 +95,7 @@ export async function filterOptions(u: AuthUser) {
     lb ? sql`SELECT id, ward_number FROM wards WHERE local_body_id = ${lb} ORDER BY ward_number` : sql`SELECT id, ward_number FROM wards WHERE false`,
     sql`SELECT code, name_en, name_ta, icon FROM complaint_categories WHERE status = 'ACTIVE' ORDER BY sort_order`,
     lb ? sql`SELECT u.id, u.full_name, r.code AS role FROM users u JOIN roles r ON r.id = u.role_id JOIN officials o ON o.user_id = u.id
-             WHERE o.local_body_id = ${lb} AND r.code IN ('FIELD_STAFF','SUPERVISOR','DEPT_OFFICER') ORDER BY u.full_name` : sql`SELECT NULL WHERE false`,
+             WHERE o.local_body_id = ${lb} AND r.default_scope IN ('ASSIGNED','DEPARTMENT') ORDER BY u.full_name` : sql`SELECT NULL WHERE false`,
     lb ? sql`SELECT id, name_en, name_ta FROM departments WHERE local_body_id = ${lb} ORDER BY name_en` : sql`SELECT NULL WHERE false`,
   ]);
   return { wards: [...wards], categories: [...categories], staff: [...staff], depts: [...depts] };

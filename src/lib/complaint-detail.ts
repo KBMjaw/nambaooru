@@ -31,7 +31,7 @@ export async function getComplaintDetail(where: { code: string }) {
                u.full_name AS uploaded_by_name
         FROM complaint_evidence e JOIN users u ON u.id = e.uploaded_by WHERE e.complaint_id = ${id} ORDER BY e.created_at`,
     sql`SELECT i.*, u.full_name AS inspector_name FROM inspections i JOIN users u ON u.id = i.inspector_id WHERE i.complaint_id = ${id} ORDER BY i.inspected_at DESC`,
-    sql`SELECT a.*, u.full_name AS assignee_name, r.code AS assignee_role, b.full_name AS assigned_by_name
+    sql`SELECT a.*, u.full_name AS assignee_name, r.code AS assignee_role, r.name_en AS assignee_role_en, r.name_ta AS assignee_role_ta, b.full_name AS assigned_by_name
         FROM assignments a JOIN users u ON u.id = a.assigned_to JOIN roles r ON r.id = u.role_id JOIN users b ON b.id = a.assigned_by
         WHERE a.complaint_id = ${id} ORDER BY a.created_at DESC`,
     sql`SELECT w.*, u.full_name AS user_name FROM work_updates w JOIN users u ON u.id = w.user_id WHERE w.complaint_id = ${id} ORDER BY w.created_at DESC`,
@@ -44,3 +44,24 @@ export async function getComplaintDetail(where: { code: string }) {
 }
 
 export type ComplaintDetail = NonNullable<Awaited<ReturnType<typeof getComplaintDetail>>>;
+
+/** Staff an official can assign on this complaint, its departments and its actions (for the work panels). */
+export async function complaintWorkData(u: import('./auth').AuthUser, c: Record<string, unknown>) {
+  const { assignableScope } = await import('./scope');
+  const { listActions } = await import('./complaint-actions');
+  const { has } = await import('./auth');
+  const [staff, depts, actions] = await Promise.all([
+    sql`SELECT usr.id, usr.full_name, r.code AS role, r.name_en AS role_name, o.designation FROM users usr JOIN roles r ON r.id = usr.role_id JOIN officials o ON o.user_id = usr.id
+        WHERE ${assignableScope(u, c.local_body_id as number)} ORDER BY r.rank DESC, usr.full_name`,
+    sql`SELECT id, name_en FROM departments WHERE local_body_id = ${c.local_body_id as number} AND status = 'ACTIVE' ORDER BY name_en`,
+    listActions(c.id as number),
+  ]);
+  const self = { id: u.id, full_name: `${u.fullName} (me)`, role: u.role, role_name: u.roleNameEn, designation: null };
+  return {
+    staff: [...staff].map((s) => ({ id: s.id as string, full_name: s.full_name as string, role: s.role as string, role_name: s.role_name as string, designation: (s.designation as string) ?? null })),
+    staffWithSelf: [self, ...staff.map((s) => ({ id: s.id as string, full_name: s.full_name as string, role: s.role as string, role_name: s.role_name as string, designation: (s.designation as string) ?? null }))],
+    departments: [...depts].map((d) => ({ id: d.id as number, name_en: d.name_en as string })),
+    actions: JSON.parse(JSON.stringify(actions)),
+    perms: { create: has(u, 'action.create'), edit: has(u, 'action.edit'), verify: has(u, 'complaint.verify'), work: has(u, 'complaint.work') || has(u, 'evidence.upload') },
+  };
+}

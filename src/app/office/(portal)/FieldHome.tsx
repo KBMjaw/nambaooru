@@ -9,7 +9,7 @@ import { Empty } from '@/components/ui';
 
 /** Field staff mobile view — action-oriented, no admin dashboards. */
 export async function FieldHome() {
-  const u = await requirePageUser('OFFICE', 'complaint.work');
+  const u = await requirePageUser('OFFICE');
   const { t, lang } = await getT();
   const works = await sql`
     SELECT a.id AS assignment_id, a.status AS a_status, a.purpose, a.due_at, a.priority AS a_priority, a.note, a.created_at AS assigned_at,
@@ -22,6 +22,13 @@ export async function FieldHome() {
     WHERE a.assigned_to = ${u.id} AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS')
       AND ((a.purpose = 'WORK' AND c.status IN ('ASSIGNED','IN_PROGRESS')) OR (a.purpose = 'INSPECTION' AND c.status = 'SITE_INSPECTION'))
     ORDER BY CASE c.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, a.due_at NULLS LAST, a.created_at`;
+  // Work items (complaint actions) where this worker is on the team — primary or supporting
+  const tasks = await sql`
+    SELECT ca.id, ca.title, ca.status, ca.priority, ca.due_at, x.assignee_role, c.code, cat.icon, w.ward_number
+    FROM complaint_action_assignees x JOIN complaint_actions ca ON ca.id = x.action_id JOIN complaints c ON c.id = ca.complaint_id
+    LEFT JOIN complaint_categories cat ON cat.id = c.category_id LEFT JOIN wards w ON w.id = c.ward_id
+    WHERE x.user_id = ${u.id} AND x.removed_at IS NULL AND ca.status IN ('PENDING','ASSIGNED','IN_PROGRESS')
+    ORDER BY CASE ca.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, ca.due_at NULLS LAST`;
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
   const inspections = works.filter((w) => w.purpose === 'INSPECTION');
   const jobs = works.filter((w) => w.purpose === 'WORK');
@@ -72,7 +79,17 @@ export async function FieldHome() {
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <h1 className="text-2xl font-extrabold text-navy-800">🧰 {t('field.title')}</h1>
-      {!works.length && <Empty icon="✅">{t('field.none')}</Empty>}
+      {!works.length && !tasks.length && <Empty icon="✅">{t('field.none')}</Empty>}
+      {tasks.length > 0 && (
+        <section><h2 className="mb-2 font-bold text-navy-800">📌 {t('actions.myTasks')} ({tasks.length})</h2>
+          <ul className="space-y-2">{tasks.map((a) => (
+            <li key={a.id as number}><Link href={`/office/complaints/${a.code}`} className="card flex items-center justify-between gap-3 p-3 hover:border-navy-500/40">
+              <span><b>{a.icon as string} {a.title as string}</b><span className="block text-xs text-slate-500">{a.code as string}{a.ward_number != null ? ` · ${t('complaint.ward')} ${a.ward_number}` : ''} · {a.assignee_role === 'PRIMARY' ? `★ ${t('office.primary')}` : t('office.supporting')}{a.due_at ? ` · ⏳ ${fmtDate(a.due_at as string, lang)}` : ''}</span></span>
+              <span className="flex flex-col items-end gap-1"><PriorityBadge priority={a.priority as string} /><span className="text-xs font-semibold text-slate-600">{t(`actionStatus.${a.status}` as never)}</span></span>
+            </Link></li>
+          ))}</ul>
+        </section>
+      )}
       {inspections.length > 0 && (
         <section><h2 className="mb-2 font-bold text-violet-800">🔍 {t('field.inspections')} ({inspections.length})</h2><ul className="space-y-3">{inspections.map(card)}</ul></section>
       )}

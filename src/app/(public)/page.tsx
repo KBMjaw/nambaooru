@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { getT } from '@/i18n/server';
@@ -8,6 +9,7 @@ import { ComplaintCard, type ComplaintRow } from '@/components/ComplaintCard';
 export default async function Home() {
   const { t, lang } = await getT();
   const user = await getUser('PUBLIC');
+  if (user?.mustChangePassword) redirect('/password');
 
   if (!user) {
     return (

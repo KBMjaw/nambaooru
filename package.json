@@ -19,7 +19,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
+    "@geoman-io/leaflet-geoman-free": "^2.20.2",
     "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
     "jose": "^6.2.12",
     "leaflet": "^1.9.4",
     "next": "^16.3.6",

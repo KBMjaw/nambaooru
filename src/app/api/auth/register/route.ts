@@ -73,7 +73,7 @@ export const POST = route(async (req) => {
               ${d.districtId}, ${d.talukId ?? null}, ${d.localBodyId ?? null}, ${d.wardId ?? null}, ${d.streetId ?? null}, ${d.streetText || null})`;
     return u;
   });
-  await audit({ id: user.id as string, role: 'CITIZEN' }, { action: 'user.register', entityType: 'user', entityId: user.id as string, targetUserId: user.id as string, newValue: { role: 'CITIZEN', localBodyId: d.localBodyId, wardId: d.wardId } });
+  await audit({ id: user.id as string, role: 'CITIZEN' }, { action: 'CITIZEN_REGISTERED', entityType: 'user', entityId: user.id as string, targetUserId: user.id as string, newValue: { role: 'CITIZEN', localBodyId: d.localBodyId, wardId: d.wardId } });
   await createSession(user.id as string, 'PUBLIC', user.token_version as number);
   (await cookies()).set(LANG_COOKIE, lang, { path: '/', maxAge: 31536000, sameSite: 'lax' });
   return { ok: true, redirect: '/' };

@@ -29,7 +29,7 @@ export const POST = route<{ params: Promise<{ code: string }> }>(async (req, { p
   for (const f of files) await storeEvidence(c.id as number, 'APPEAL', f, u.id, { source: 'UPLOAD' }, a.id as number);
   await sql`INSERT INTO complaint_status_history (complaint_id, from_status, to_status, actor_id, actor_label, note)
             VALUES (${c.id}, ${c.status}, ${c.status}, ${u.id}, ${`${u.fullName} (Citizen)`}, 'Reconsideration requested')`;
-  await audit(u, { action: 'appeal.create', entityType: 'complaint', entityId: code, newValue: { appealId: a.id, statusAtAppeal: c.status } });
+  await audit(u, { action: 'APPEAL_CREATED', entityType: 'complaint', entityId: code, newValue: { appealId: a.id, statusAtAppeal: c.status } });
   await notifyOfficials(c.id as number, 'APPEAL_SUBMITTED', {}, { includeWardMember: false });
   return { ok: true };
 });

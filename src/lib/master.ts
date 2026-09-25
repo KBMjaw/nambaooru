@@ -74,6 +74,7 @@ export const ENTITIES: Record<string, Entity> = {
       { key: 'district_id', label: 'District', type: 'ref', ref: 'districts', required: true }, { key: 'taluk_id', label: 'Taluk', type: 'ref', ref: 'taluks', nullable: true },
       { key: 'block_id', label: 'Block', type: 'ref', ref: 'blocks', nullable: true, list: false },
       { key: 'name_en', label: 'Name (EN)', type: 'text', required: true }, { key: 'name_ta', label: 'Name (TA)', type: 'text' },
+      { key: 'controlling_authority', label: 'Controlling authority', type: 'text', nullable: true }, { key: 'pincode', label: 'Pincode', type: 'text', nullable: true, list: false },
       { key: 'center_lat', label: 'Centre lat', type: 'float', nullable: true, list: false }, { key: 'center_lng', label: 'Centre lng', type: 'float', nullable: true, list: false }, STATUS,
     ],
   },
@@ -83,6 +84,8 @@ export const ENTITIES: Record<string, Entity> = {
     cols: [
       { key: 'local_body_id', label: 'Local body', type: 'ref', ref: 'local_bodies', required: true }, { key: 'ward_number', label: 'Ward No.', type: 'number', required: true },
       { key: 'name_en', label: 'Ward name (EN)', type: 'text' }, { key: 'name_ta', label: 'Ward name (TA)', type: 'text' },
+      { key: 'population', label: 'Population', type: 'number', nullable: true }, { key: 'street_count', label: 'No. of streets', type: 'number', nullable: true },
+      { key: 'description', label: 'Description', type: 'textarea', nullable: true, list: false },
       { key: 'center_lat', label: 'Centre lat', type: 'float', nullable: true, list: false }, { key: 'center_lng', label: 'Centre lng', type: 'float', nullable: true, list: false }, STATUS,
     ],
   },
@@ -117,7 +120,7 @@ export const ENTITIES: Record<string, Entity> = {
     ],
   },
   departments: {
-    table: 'departments', title: 'Departments', perm: 'masterdata.manage', pk: 'id', pkType: 'int', order: 'local_body_id, name_en', search: ['name_en', 'name_ta', 'code'], statusCol: ACTIVE, filterBy: 'local_body_id',
+    table: 'departments', title: 'Departments', perm: 'department.manage', pk: 'id', pkType: 'int', order: 'local_body_id, name_en', search: ['name_en', 'name_ta', 'code'], statusCol: ACTIVE, filterBy: 'local_body_id',
     refLabel: "t.name_en || ' – ' || COALESCE((SELECT name_en FROM local_bodies l WHERE l.id = t.local_body_id), 'template')",
     cols: [{ key: 'code', label: 'Code', type: 'text', required: true }, { key: 'local_body_id', label: 'Local body', type: 'ref', ref: 'local_bodies', nullable: true }, { key: 'name_en', label: 'Name (EN)', type: 'text', required: true }, { key: 'name_ta', label: 'Name (TA)', type: 'text', required: true }, STATUS],
   },

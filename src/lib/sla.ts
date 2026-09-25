@@ -32,7 +32,7 @@ export async function slaSweep() {
       const recipients = await sql`
         SELECT DISTINCT u.id FROM users u JOIN roles r ON r.id = u.role_id JOIN officials o ON o.user_id = u.id
         WHERE u.status = 'ACTIVE' AND o.local_body_id = ${c.local_body_id}
-          AND (r.code = 'EO' OR (r.code IN ('SUPERVISOR','DEPT_OFFICER') AND (o.department_id = ${c.department_id} OR o.department_id IS NULL))
+          AND (r.default_scope = 'LOCAL_BODY' OR (r.default_scope = 'DEPARTMENT' AND (o.department_id = ${c.department_id} OR o.department_id IS NULL))
                OR u.id = ${c.assigned_to})`;
       for (const r of recipients) await notify(r.id as string, tpl, { code: c.code as string }, c.id as number);
     }

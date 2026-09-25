@@ -3,8 +3,8 @@ import { notFound } from 'next/navigation';
 import { requirePageUser, has } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { getT } from '@/i18n/server';
-import { complaintScope, assignableScope } from '@/lib/scope';
-import { getComplaintDetail } from '@/lib/complaint-detail';
+import { complaintScope } from '@/lib/scope';
+import { getComplaintDetail, complaintWorkData } from '@/lib/complaint-detail';
 import { findDuplicates } from '@/lib/duplicates';
 import { maskMobile } from '@/lib/crypto';
 import { fmtDateTime, mapsLink, navigateLink } from '@/lib/format';
@@ -14,6 +14,7 @@ import { BeforeAfter, EvidenceGrid } from '@/components/Evidence';
 import { Timeline } from '@/components/Timeline';
 import { ActionForm, type UserOpt } from '@/components/office/ActionForm';
 import { ComplaintMiniMap } from '@/components/office/ComplaintMiniMap';
+import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
 import type { MessageKey } from '@/i18n';
 
 export default async function OfficeComplaintDetail({ params }: { params: Promise<{ code: string }> }) {
@@ -31,16 +32,17 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
   const open = !['CLOSED', 'REJECTED', 'DUPLICATE'].includes(status);
   const ai = (c.ai_extraction ?? {}) as { category?: string; confidence?: number; severity?: string; matchedTerms?: string[]; engine?: string; language?: string; safety?: { cues_en?: string[] }; duration?: { en?: string }; citizenChoseCategory?: string; translation_en?: string };
 
-  const staff = (await sql`
-    SELECT usr.id, usr.full_name, r.code AS role, o.designation FROM users usr JOIN roles r ON r.id = usr.role_id JOIN officials o ON o.user_id = usr.id
-    WHERE ${assignableScope(u)} ORDER BY r.rank DESC, usr.full_name`).map((r) => ({ id: r.id as string, full_name: r.full_name as string, role: r.role as string, designation: r.designation as string | null })) as UserOpt[];
-  const inspectors: UserOpt[] = has(u, 'complaint.inspect') ? [{ id: u.id, full_name: `${u.fullName} (me)`, role: u.role }, ...staff] : staff;
+  const work = await complaintWorkData(u, c);
+  const staff: UserOpt[] = work.staff;
+  const inspectors: UserOpt[] = has(u, 'complaint.inspect') ? work.staffWithSelf : staff;
+  const team = d.assignments.filter((a) => a.purpose === 'WORK' && ['PENDING', 'ACCEPTED', 'IN_PROGRESS'].includes(a.status as string));
+  const supportTeam: UserOpt[] = team.filter((a) => a.assignee_role === 'SUPPORT').map((a) => ({ id: a.assigned_to as string, full_name: a.assignee_name as string, role: a.assignee_role as string, role_name: a.assignee_role_en as string }));
   const myWork = d.assignments.find((a) => a.purpose === 'WORK' && a.assigned_to === u.id && ['PENDING', 'ACCEPTED', 'IN_PROGRESS'].includes(a.status as string));
   const dups = open && has(u, 'complaint.reject') ? await findDuplicates({
     categoryId: c.category_id as number, localBodyId: c.local_body_id as number, wardId: c.ward_id as number | null, streetId: c.street_id as number | null,
     latitude: c.latitude as number | null, longitude: c.longitude as number | null, text: c.original_text as string, excludeId: c.id as number,
   }) : [];
-  const audits = has(u, 'audit.view') || u.role !== 'FIELD_STAFF'
+  const audits = has(u, 'audit.view') || u.scope !== 'ASSIGNED'
     ? await sql`SELECT a.action, a.created_at, a.actor_role, u.full_name FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_id
                 WHERE a.entity_type = 'complaint' AND a.entity_id = ${code} ORDER BY a.created_at DESC LIMIT 50`
     : [];
@@ -55,12 +57,17 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
     actions.push(<ActionForm key={k('insp')} code={code} action="schedule_inspection" label={status === 'SITE_INSPECTION' ? `${t('office.reassign')} — ${t('office.inspector')}` : t('office.sendInspection')} icon="🔍" tone="btn-outline" fields={['inspector', 'dueAt', 'note']} users={inspectors} block />);
   if (status === 'INITIAL_REVIEW' && has(u, 'complaint.review') && !c.inspection_required)
     actions.push(<ActionForm key={k('vd')} code={code} action="verify_direct" label={t('office.verifyWithoutInspection')} icon="✔️" tone="btn-outline" fields={['note']} block />);
-  if (status === 'SITE_INSPECTION' && has(u, 'complaint.inspect') && (u.role !== 'FIELD_STAFF' || c.inspector_id === u.id))
+  if (status === 'SITE_INSPECTION' && has(u, 'complaint.inspect') && (u.scope !== 'ASSIGNED' || c.inspector_id === u.id))
     actions.push(<ActionForm key={k('rec')} code={code} action="inspect" label={t('office.recordInspection')} icon="📝" tone="btn-primary" fields={['outcome', 'notes', 'photoRequired', 'gpsRequired']} block />);
   if (status === 'VERIFIED' && has(u, 'complaint.assign'))
-    actions.push(<ActionForm key={k('as')} code={code} action="assign" label={t('office.assign')} icon="👷" tone="btn-primary" fields={['assignee', 'priority', 'dueAt', 'note']} users={staff} defaults={{ priority: c.priority as string }} block />);
-  if (['ASSIGNED', 'IN_PROGRESS'].includes(status) && has(u, 'complaint.reassign'))
-    actions.push(<ActionForm key={k('ras')} code={code} action="reassign" label={t('office.reassign')} icon="🔄" tone="btn-outline" fields={['assignee', 'priority', 'dueAt', 'note']} users={staff} defaults={{ priority: c.priority as string }} block />);
+    actions.push(<ActionForm key={k('as')} code={code} action="assign" label={t('office.assign')} icon="👷" tone="btn-primary" fields={['assignee', 'supporters', 'priority', 'dueAt', 'note']} users={staff} defaults={{ priority: c.priority as string }} block />);
+  if (['ASSIGNED', 'IN_PROGRESS'].includes(status) && has(u, 'complaint.reassign')) {
+    actions.push(<ActionForm key={k('ras')} code={code} action="reassign" label={t('office.reassign')} icon="🔄" tone="btn-outline" fields={['assignee', 'supporters', 'priority', 'dueAt', 'noteRequired']} users={staff} defaults={{ priority: c.priority as string }} block />);
+    actions.push(<ActionForm key={k('asp')} code={code} action="add_support" label={t('office.addSupport')} icon="➕" tone="btn-outline" fields={['user', 'note']} users={staff.filter((s) => !team.some((x) => x.assigned_to === s.id))} block />);
+    if (supportTeam.length) actions.push(<ActionForm key={k('rsp')} code={code} action="remove_support" label={t('office.removeSupport')} icon="➖" tone="btn-ghost" fields={['user', 'noteRequired']} users={supportTeam} block />);
+  }
+  if (['CLOSED', 'REJECTED', 'DUPLICATE'].includes(status) && has(u, 'complaint.reopen'))
+    actions.push(<ActionForm key={k('ro')} code={code} action="reopen" label={t('office.reopen')} icon="🔓" tone="btn-outline" fields={['noteRequired']} block />);
   if (myWork && has(u, 'complaint.work')) {
     if (myWork.status === 'PENDING') actions.push(<ActionForm key={k('acc')} code={code} action="accept" label={t('field.accept')} icon="👍" block />);
     if (status === 'ASSIGNED') actions.push(<ActionForm key={k('st')} code={code} action="start" label={t('field.start')} icon="▶️" tone="btn-primary" block />);
@@ -144,6 +151,10 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
             {ai.translation_en && <p className="mt-2 text-sm text-slate-600">EN: {ai.translation_en}</p>}
           </Section>
 
+          <Section title={`🛠️ ${t('actions.title')} (${work.actions.length})`}>
+            <ActionsPanel code={code} portal="OFFICE" actions={work.actions as ActionRow[]} staff={work.staffWithSelf} departments={work.departments} perms={work.perms} meId={u.id} open={open} />
+          </Section>
+
           {(d.inspections.length > 0 || d.assignments.length > 0 || d.updates.length > 0) && (
             <Section title={`${t('complaint.inspection')} · ${t('office.assignments')} · ${t('office.workUpdates')}`}>
               <ul className="space-y-2 text-sm">
@@ -152,7 +163,7 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
                     <span className="text-xs text-slate-500">{t('complaint.inspectionBy', { name: i.inspector_name as string })} · {fmtDateTime(i.inspected_at as string, lang)}{i.latitude != null ? ` · 📍 ${(i.latitude as number).toFixed(5)}, ${(i.longitude as number).toFixed(5)}` : ''}</span></li>
                 ))}
                 {d.assignments.map((a) => (
-                  <li key={`a${a.id}`} className="rounded-lg bg-slate-50 p-2.5">{a.purpose === 'INSPECTION' ? '🔍' : '👷'} {a.assignee_name as string} ({t(`role.${a.assignee_role}` as MessageKey)}) — <b>{a.status as string}</b>
+                  <li key={`a${a.id}`} className="rounded-lg bg-slate-50 p-2.5">{a.purpose === 'INSPECTION' ? '🔍' : a.assignee_role === 'SUPPORT' ? '🤝' : '👷'} {a.assignee_name as string} ({L(a.assignee_role_en, a.assignee_role_ta)}){a.purpose === 'WORK' ? <span className="ml-1 badge bg-slate-200 text-slate-600">{a.assignee_role === 'SUPPORT' ? t('office.supporting') : t('office.primary')}</span> : null} — <b>{a.status as string}</b>
                     <br /><span className="text-xs text-slate-500">{t('field.assignedBy')}: {a.assigned_by_name as string} · {fmtDateTime(a.created_at as string, lang)}{a.due_at ? ` · ${t('office.dueDate')}: ${fmtDateTime(a.due_at as string, lang)}` : ''}{a.note ? ` · ${a.note}` : ''}</span></li>
                 ))}
                 {d.updates.map((w) => (

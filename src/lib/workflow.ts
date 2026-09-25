@@ -30,6 +30,12 @@ export const TRANSITIONS: Record<Status, Status[]> = {
   DUPLICATE: ['REOPENED'],
 };
 
+/** Business audit code recorded for entering a status (everything else is STATUS_CHANGED). */
+const STATUS_AUDIT: Partial<Record<Status, string>> = {
+  VERIFIED: 'COMPLAINT_VERIFIED', COMPLETION_VERIFIED: 'COMPLAINT_VERIFIED', REJECTED: 'COMPLAINT_REJECTED', DUPLICATE: 'COMPLAINT_REJECTED',
+  CLOSED: 'COMPLAINT_CLOSED', REOPENED: 'COMPLAINT_REOPENED',
+};
+
 /** Citizen notification template for entering a status. */
 const CITIZEN_TEMPLATE: Partial<Record<Status, string>> = {
   INITIAL_REVIEW: 'ACCEPTED',
@@ -93,7 +99,7 @@ export async function transition(complaintId: number, to: Status, actor: AuthUse
   });
 
   await audit(actor, {
-    action: opts.auditAction ?? `complaint.status.${to.toLowerCase()}`,
+    action: opts.auditAction ?? STATUS_AUDIT[to] ?? 'STATUS_CHANGED',
     entityType: 'complaint',
     entityId: c.code as string,
     oldValue: { status: from },

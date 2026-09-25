@@ -40,20 +40,21 @@ export async function validateFile(file: File) {
 
 export async function storeEvidence(
   complaintId: number,
-  kind: 'CITIZEN' | 'INSPECTION' | 'PROGRESS' | 'COMPLETION' | 'APPEAL',
+  kind: 'CITIZEN' | 'INSPECTION' | 'PROGRESS' | 'COMPLETION' | 'APPEAL' | 'ACTION',
   file: File,
   uploadedBy: string,
   meta: EvidenceMeta = {},
   appealId?: number | null,
+  actionId?: number | null,
 ) {
   const v = await validateFile(file);
   const hash = meta.imageHash && /^[0-9a-f]{16}$/.test(meta.imageHash) ? meta.imageHash : null;
   const [row] = await sql`
     INSERT INTO complaint_evidence (complaint_id, kind, media_type, mime_type, size_bytes, sha256, image_hash, data,
-      latitude, longitude, gps_accuracy_m, captured_at, capture_source, uploaded_by, appeal_id)
+      latitude, longitude, gps_accuracy_m, captured_at, capture_source, uploaded_by, appeal_id, action_id)
     VALUES (${complaintId}, ${kind}, ${v.media}, ${v.mime}, ${v.buf.length}, ${sha256Hex(v.buf)}, ${hash}, ${v.buf},
       ${meta.latitude ?? null}, ${meta.longitude ?? null}, ${meta.accuracy ?? null}, ${meta.capturedAt ?? null},
-      ${meta.source ?? null}, ${uploadedBy}, ${appealId ?? null})
+      ${meta.source ?? null}, ${uploadedBy}, ${appealId ?? null}, ${actionId ?? null})
     RETURNING id`;
   return row.id as number;
 }

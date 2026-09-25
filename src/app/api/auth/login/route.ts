@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { route, body } from '@/lib/api';
 import { sql } from '@/lib/db';
-import { createSession, verifyPassword, requestMeta, type Portal } from '@/lib/auth';
+import { createSession, verifyPassword, requestMeta, PASSWORD_PATH, type Portal } from '@/lib/auth';
 import { rateLimit } from '@/lib/ratelimit';
-import { audit } from '@/lib/audit';
+import { securityLog } from '@/lib/audit';
 import { HttpError } from '@/lib/errors';
 import { getSetting } from '@/lib/settings';
 import { cookies } from 'next/headers';
@@ -26,9 +26,9 @@ export const POST = route(async (req) => {
 
   // Citizens log in with mobile number; officials/admins with username.
   const rows = portal === 'PUBLIC'
-    ? await sql`SELECT u.*, r.code AS role, r.portal FROM users u JOIN roles r ON r.id = u.role_id
+    ? await sql`SELECT u.*, r.code AS role, r.portal, r.status AS role_status FROM users u JOIN roles r ON r.id = u.role_id
                 WHERE u.mobile = ${identifier} AND r.code = 'CITIZEN' LIMIT 1`
-    : await sql`SELECT u.*, r.code AS role, r.portal FROM users u JOIN roles r ON r.id = u.role_id
+    : await sql`SELECT u.*, r.code AS role, r.portal, r.status AS role_status FROM users u JOIN roles r ON r.id = u.role_id
                 WHERE lower(u.username) = ${identifier.toLowerCase()} LIMIT 1`;
   const u = rows[0];
   const ok = await verifyPassword(password, (u?.password_hash as string) ?? DUMMY);
@@ -40,20 +40,29 @@ export const POST = route(async (req) => {
       await sql`UPDATE users SET failed_logins = failed_logins + 1,
                   locked_until = CASE WHEN failed_logins + 1 >= ${max} THEN now() + make_interval(mins => ${mins}) ELSE locked_until END
                 WHERE id = ${u.id}`;
-      await audit({ id: u.id as string, role: u.role as string }, { action: 'auth.login_failed', entityType: 'user', entityId: u.id as string, targetUserId: u.id as string, newValue: { portal } });
     }
+    await securityLog('LOGIN_FAILED', { userId: (u?.id as string) ?? null, identifier, portal });
     throw new HttpError(401, 'INVALID_CREDENTIALS', 'auth.invalid');
   }
-  if (u.locked_until && new Date(u.locked_until as string) > new Date()) throw new HttpError(423, 'LOCKED', 'auth.locked');
-  if (u.status !== 'ACTIVE') throw new HttpError(403, 'INACTIVE', 'auth.inactive');
+  if (u.locked_until && new Date(u.locked_until as string) > new Date()) {
+    await securityLog('LOGIN_LOCKED', { userId: u.id as string, identifier, portal });
+    throw new HttpError(423, 'LOCKED', 'auth.locked');
+  }
+  if (u.status !== 'ACTIVE' || u.role_status !== 'ACTIVE') {
+    await securityLog('LOGIN_BLOCKED', { userId: u.id as string, identifier, portal, detail: { reason: 'INACTIVE' } });
+    throw new HttpError(403, 'INACTIVE', 'auth.inactive');
+  }
   // The portal is decided by the role stored in the DB — a citizen can never obtain an office/admin session.
-  if (u.portal !== portal) throw new HttpError(403, 'WRONG_PORTAL', 'auth.wrongPortal');
+  if (u.portal !== portal) {
+    await securityLog('LOGIN_BLOCKED', { userId: u.id as string, identifier, portal, detail: { reason: 'WRONG_PORTAL' } });
+    throw new HttpError(403, 'WRONG_PORTAL', 'auth.wrongPortal');
+  }
 
   await sql`UPDATE users SET failed_logins = 0, locked_until = NULL, last_login_at = now() WHERE id = ${u.id}`;
   await createSession(u.id as string, portal as Portal, u.token_version as number);
-  await audit({ id: u.id as string, role: u.role as string }, { action: 'auth.login', entityType: 'user', entityId: u.id as string, targetUserId: u.id as string, newValue: { portal } });
+  await securityLog('LOGIN_SUCCESS', { userId: u.id as string, identifier, portal, detail: u.must_change_password ? { forcedChange: true } : undefined });
   (await cookies()).set(LANG_COOKIE, u.preferred_language as string, { path: '/', maxAge: 31536000, sameSite: 'lax' });
 
-  const home = portal === 'PUBLIC' ? '/' : portal === 'OFFICE' ? '/office' : '/admin';
+  const home = u.must_change_password ? PASSWORD_PATH[portal as Portal] : portal === 'PUBLIC' ? '/' : portal === 'OFFICE' ? '/office' : '/admin';
   return { ok: true, redirect: home, role: u.role };
 });
