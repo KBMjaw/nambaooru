@@ -22,7 +22,7 @@ export default async function Home() {
               <p className="mt-3 text-slate-600">{t('home.heroText')}</p>
               <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                 <Link href="/login?next=/report" className="btn btn-primary btn-lg">🎙️ {t('home.reportCta')}</Link>
-                <Link href="/register" className="btn btn-outline btn-lg">{t('nav.register')}</Link>
+                <Link href="/login?next=/track" className="btn btn-outline btn-lg">🔎 {t('nav.track')}</Link>
               </div>
             </div>
             <div className="order-1 flex justify-center md:order-2">
@@ -34,20 +34,30 @@ export default async function Home() {
         <section>
           <h2 className="mb-3 text-lg font-bold text-slate-800">{t('home.howTitle')}</h2>
           <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {(['home.how1', 'home.how2', 'home.how3', 'home.how4'] as const).map((k, i) => (
+            {([['home.how1', '🎙️'], ['home.how2', '📷'], ['home.how3', '📍'], ['home.how4', '🔎']] as const).map(([k, icon], i) => (
               <li key={k} className="card flex items-start gap-3 p-4">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-navy-700 font-bold text-white">{i + 1}</span>
-                <span className="font-semibold text-slate-700">{t(k)}</span>
+                <span className="font-semibold text-slate-700"><span aria-hidden>{icon} </span>{t(k)}</span>
               </li>
             ))}
           </ol>
+          <p className="mt-2 text-sm text-slate-500">{t('home.howNote')}</p>
+        </section>
+
+        <section className="card p-5">
+          <h2 className="mb-3 text-lg font-bold text-slate-800">✅ {t('home.transparencyTitle')}</h2>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {(['home.tr1', 'home.tr2', 'home.tr3', 'home.tr4'] as const).map((k) => (
+              <li key={k} className="flex items-start gap-2 text-slate-700"><span className="text-leaf-600" aria-hidden>✔</span>{t(k)}</li>
+            ))}
+          </ul>
         </section>
 
         <section className="card flex flex-col items-start justify-between gap-3 p-5 sm:flex-row sm:items-center">
-          <span className="font-semibold text-slate-700">{t('home.officials')}</span>
+          <span className="font-semibold text-slate-700">{t('home.trackText')}</span>
           <div className="flex gap-2">
-            <Link href="/office/login" className="btn btn-navy">{t('home.officeLogin')}</Link>
-            <Link href="/admin/login" className="btn btn-outline">{t('home.adminLogin')}</Link>
+            <Link href="/login?next=/track" className="btn btn-navy">🔎 {t('nav.track')}</Link>
+            <Link href="/register" className="btn btn-outline">{t('nav.register')}</Link>
           </div>
         </section>
       </div>

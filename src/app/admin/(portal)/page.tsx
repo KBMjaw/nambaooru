@@ -6,6 +6,8 @@ import { dashboardData } from '@/lib/dashboard';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import { DashboardSections } from '@/components/DashboardSections';
 import { Stat } from '@/components/ui';
+import { siteAnalyticsSummary } from '@/lib/site-analytics';
+import { WebsiteVisitorsCard } from '@/components/admin/WebsiteVisitorsCard';
 
 export default async function AdminHome() {
   const u = await requirePageUser('ADMIN');
@@ -19,6 +21,7 @@ export default async function AdminHome() {
                (SELECT count(*) FROM audit_logs WHERE created_at > now() - interval '24 hours')::int AS audit24`,
   ]);
   const a = has(u, 'analytics.view') ? await analytics(u) : null;
+  const site = has(u, 'site_analytics.view') ? await siteAnalyticsSummary() : null;
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-extrabold text-slate-800">📊 {t('portal.admin')}</h1>
@@ -30,6 +33,7 @@ export default async function AdminHome() {
         <Stat label={t('nav.roles')} value={sys.roles as number} href="/admin/roles" />
         <Stat label={`${t('nav.audit')} (24h)`} value={sys.audit24 as number} href="/admin/audit" />
       </div>
+      {site && <WebsiteVisitorsCard s={site} t={t} />}
       {a && <AnalyticsView a={a} lang={lang} showLocalBodies linkBase="/admin/complaints" />}
     </div>
   );
