@@ -14,6 +14,10 @@ async function anyUser(req: NextRequest) {
 
 export const GET = route(async (req) => {
   const u = await anyUser(req);
+  if (req.nextUrl.searchParams.get('count')) {
+    const [r] = await sql`SELECT count(*)::int AS n FROM notifications WHERE user_id = ${u.id} AND read_at IS NULL AND channel = 'IN_APP'`;
+    return { unread: r.n as number };
+  }
   const items = await sql`SELECT n.id, n.title_en, n.title_ta, n.body_en, n.body_ta, n.read_at, n.created_at, c.code
                           FROM notifications n LEFT JOIN complaints c ON c.id = n.complaint_id
                           WHERE n.user_id = ${u.id} AND n.channel = 'IN_APP' ORDER BY n.created_at DESC LIMIT 50`;

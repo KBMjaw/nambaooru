@@ -13,12 +13,17 @@ export async function dashboardData(u: AuthUser) {
   const [[counts], [people], byWard, byDept, byLb, recentCitizens, recentUsers, [work]] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS pending,
-               count(*) FILTER (WHERE c.status IN ('ASSIGNED','IN_PROGRESS'))::int AS in_progress,
-               count(*) FILTER (WHERE c.status IN ('WORK_COMPLETED','COMPLETION_VERIFIED','CLOSED'))::int AS completed,
+               count(*) FILTER (WHERE c.status IN ('ASSIGNED','IN_PROGRESS','ON_HOLD','REWORK_REQUIRED'))::int AS in_progress,
+               count(*) FILTER (WHERE c.status IN ('WORK_COMPLETED','VERIFICATION_PENDING','COMPLETION_VERIFIED','CLOSED'))::int AS completed,
                count(*) FILTER (WHERE c.sla_due_at < now() AND ${OPEN})::int AS overdue,
                count(*) FILTER (WHERE c.priority IN ('HIGH','CRITICAL') AND ${OPEN})::int AS high,
                count(*) FILTER (WHERE c.status = 'SITE_INSPECTION')::int AS inspection,
-               count(*) FILTER (WHERE c.status = 'WORK_COMPLETED')::int AS awaiting_verification,
+               count(*) FILTER (WHERE c.status IN ('WORK_COMPLETED','VERIFICATION_PENDING'))::int AS awaiting_verification,
+               count(*) FILTER (WHERE c.status = 'REWORK_REQUIRED')::int AS rework,
+               count(*) FILTER (WHERE c.status = 'ON_HOLD')::int AS on_hold,
+               count(*) FILTER (WHERE c.escalation_level > 0 AND ${OPEN})::int AS escalated,
+               count(*) FILTER (WHERE c.resolution_type = 'NO_ISSUE_FOUND')::int AS no_issue,
+               count(*) FILTER (WHERE c.status = 'CLOSED')::int AS closed,
                count(*) FILTER (WHERE c.status IN ('SUBMITTED','AI_CLASSIFIED','REOPENED','INITIAL_REVIEW'))::int AS new
         FROM complaints c WHERE ${cs}`,
     sql`SELECT (SELECT count(*) FROM users usr JOIN roles r ON r.id = usr.role_id JOIN citizens ct ON ct.user_id = usr.id WHERE ${citizenVisibility(u)})::int AS citizens,
@@ -29,7 +34,7 @@ export async function dashboardData(u: AuthUser) {
         FROM complaints c JOIN wards w ON w.id = c.ward_id JOIN local_bodies lb ON lb.id = w.local_body_id WHERE ${cs}
         GROUP BY w.id, w.ward_number, lb.name_en, lb.name_ta ORDER BY n DESC, w.ward_number LIMIT 12`,
     sql`SELECT d.id, d.name_en, d.name_ta, lb.name_en AS lb_en, count(*)::int AS n, count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE c.status IN ('WORK_COMPLETED','COMPLETION_VERIFIED','CLOSED'))::int AS done,
+               count(*) FILTER (WHERE c.status IN ('WORK_COMPLETED','VERIFICATION_PENDING','COMPLETION_VERIFIED','CLOSED'))::int AS done,
                count(*) FILTER (WHERE c.sla_due_at < now() AND ${OPEN})::int AS overdue,
                round(avg(EXTRACT(EPOCH FROM (c.closed_at - c.submitted_at)) / 3600) FILTER (WHERE c.status = 'CLOSED'))::int AS avg_hours
         FROM complaints c JOIN departments d ON d.id = c.department_id JOIN local_bodies lb ON lb.id = d.local_body_id WHERE ${cs}

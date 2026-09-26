@@ -11,7 +11,7 @@ export async function analytics(u: AuthUser, opts: { localBodyId?: number | null
                count(*) FILTER (WHERE status NOT IN ('CLOSED','REJECTED','DUPLICATE'))::int AS pending,
                count(*) FILTER (WHERE status = 'SITE_INSPECTION')::int AS inspection,
                count(*) FILTER (WHERE status IN ('ASSIGNED','IN_PROGRESS'))::int AS in_progress,
-               count(*) FILTER (WHERE status IN ('WORK_COMPLETED','COMPLETION_VERIFIED','CLOSED'))::int AS completed,
+               count(*) FILTER (WHERE status IN ('WORK_COMPLETED','VERIFICATION_PENDING','COMPLETION_VERIFIED','CLOSED'))::int AS completed,
                count(*) FILTER (WHERE status = 'CLOSED')::int AS closed,
                count(*) FILTER (WHERE status = 'REJECTED')::int AS rejected,
                count(*) FILTER (WHERE status = 'DUPLICATE')::int AS duplicate,
@@ -31,7 +31,7 @@ export async function analytics(u: AuthUser, opts: { localBodyId?: number | null
     sql`SELECT u.id, u.full_name, r.code AS role, count(*)::int AS n,
                count(*) FILTER (WHERE c.sla_due_at < now())::int AS overdue
         FROM complaints c JOIN users u ON u.id = c.assigned_to JOIN roles r ON r.id = u.role_id
-        WHERE ${scope} AND c.status IN ('ASSIGNED','IN_PROGRESS','WORK_COMPLETED') GROUP BY u.id, u.full_name, r.code ORDER BY n DESC LIMIT 12`,
+        WHERE ${scope} AND c.status IN ('ASSIGNED','IN_PROGRESS','ON_HOLD','REWORK_REQUIRED','WORK_COMPLETED','VERIFICATION_PENDING') GROUP BY u.id, u.full_name, r.code ORDER BY n DESC LIMIT 12`,
     // Six-month trend: one grouped pass per series (the scope filter is evaluated twice, not once per month).
     sql`SELECT to_char(m, 'Mon YY') AS month, COALESCE(cr.n, 0)::int AS a, COALESCE(cl.n, 0)::int AS b
         FROM generate_series(date_trunc('month', now()) - interval '5 months', date_trunc('month', now()), interval '1 month') AS m

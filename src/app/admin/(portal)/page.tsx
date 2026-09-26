@@ -5,6 +5,9 @@ import { analytics } from '@/lib/analytics';
 import { dashboardData } from '@/lib/dashboard';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import { DashboardSections } from '@/components/DashboardSections';
+import { ActionBuckets } from '@/components/ActionBuckets';
+import { after } from 'next/server';
+import { maybeSlaSweep } from '@/lib/sla';
 import { Stat } from '@/components/ui';
 import { siteAnalyticsSummary } from '@/lib/site-analytics';
 import { WebsiteVisitorsCard } from '@/components/admin/WebsiteVisitorsCard';
@@ -25,6 +28,7 @@ export default async function AdminHome() {
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-extrabold text-slate-800">📊 {t('portal.admin')}</h1>
+      {has(u, 'complaint.view.all') && <ActionBuckets u={u} base="/admin" />}
       <DashboardSections d={d} base="/admin" canCitizens={has(u, 'citizen.view')} canUsers={has(u, 'user.view') || has(u, 'user.manage') || has(u, 'user.manage.all')} />
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
         <Stat label={t('reg.district')} value={sys.districts as number} href="/admin/locations?tab=districts" />

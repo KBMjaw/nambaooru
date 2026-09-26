@@ -80,17 +80,21 @@ export const POST = route(async (req) => {
   }
 
   const routed = await routeComplaint(lb.id as number, cat.id as number, (ward?.id as number) ?? null);
+  // Issue type (sub-category): first admin-configured type whose keywords occur in the citizen's words; officers can change it
+  const lowered = p.text.toLowerCase();
+  const issueTypes = await sql`SELECT id, keywords FROM complaint_issue_types WHERE category_id = ${cat.id} AND status = 'ACTIVE' ORDER BY sort_order, id`;
+  const issueTypeId = (issueTypes.find((it) => (it.keywords as string[]).some((k) => k && lowered.includes(k.toLowerCase())))?.id as number | undefined) ?? null;
   const sla = await slaHours(cat.id as number, priority, lb.id as number);
   const code = await nextComplaintCode();
   const [cz] = await sql`SELECT address_enc, landmark, pincode, ward_id, street_id, street_text FROM citizens WHERE user_id = ${u.id}`;
 
   const [c] = await sql`
-    INSERT INTO complaints (code, citizen_id, category_id, department_id, local_body_id, ward_id, street_id, street_text, landmark,
+    INSERT INTO complaints (code, citizen_id, category_id, issue_type_id, department_id, suggested_department_id, department_assigned_at, local_body_id, ward_id, street_id, street_text, landmark,
       pincode, district_id, location_snapshot, citizen_address_snapshot, latitude, longitude, gps_accuracy_m, gps_captured_at,
       location_conflict, location_conflict_note, original_text, input_mode, detected_language, title_en, title_ta, summary_en, summary_ta,
       ai_extraction, ai_engine, severity, priority, safety_risk, duration_text, status, possible_duplicate_of_id, duplicate_override,
       sla_due_at, submitted_at)
-    VALUES (${code}, ${u.id}, ${cat.id}, ${routed.departmentId}, ${lb.id}, ${ward?.id ?? null}, ${street?.id ?? null},
+    VALUES (${code}, ${u.id}, ${cat.id}, ${issueTypeId}, ${routed.departmentId}, ${routed.departmentId}, ${routed.departmentId ? new Date() : null}, ${lb.id}, ${ward?.id ?? null}, ${street?.id ?? null},
       ${street ? null : p.streetText ?? null}, ${p.landmark ?? null}, ${(cz?.pincode as string) ?? null}, ${lb.district_id},
       ${sql.json({ local_body: lb.name_en, local_body_ta: lb.name_ta, ward: ward?.ward_number ?? null, street: street?.name_en ?? p.streetText ?? null, street_ta: street?.name_ta ?? null })},
       ${sql.json({ pincode: cz?.pincode ?? null, ward_id: cz?.ward_id ?? null, street_id: cz?.street_id ?? null, street_text: cz?.street_text ?? null, address: cz ? decrypt(cz.address_enc as string) : null })},

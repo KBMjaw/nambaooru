@@ -12,10 +12,14 @@ import { ComplaintsTable } from '@/components/office/ComplaintsTable';
 import { FieldHome } from './FieldHome';
 import { dashboardData } from '@/lib/dashboard';
 import { DashboardSections } from '@/components/DashboardSections';
+import { ActionBuckets } from '@/components/ActionBuckets';
+import { after } from 'next/server';
+import { maybeSlaSweep } from '@/lib/sla';
 
 export default async function OfficeHome() {
   const u = await requirePageUser('OFFICE');
   const { t, lang } = await getT();
+  after(maybeSlaSweep);
   if (u.scope === 'ASSIGNED') return <FieldHome />;
 
   const counts = await bucketCounts(u);
@@ -40,6 +44,7 @@ export default async function OfficeHome() {
     [t('office.assigned'), counts.assigned, 'navy', 'assigned'],
     [t('office.inProgress'), counts.progress, 'sun', 'progress'],
     [t('office.awaitingVerification'), counts.verification, 'sun', 'verification'],
+    [t('wf.bucket.rework'), counts.rework, 'pin', 'rework'],
     [t('office.completed'), counts.completed, 'leaf', 'completed'],
     [t('office.rejected'), counts.rejected + counts.duplicate, 'slate', 'rejected'],
     [t('office.overdue'), counts.overdue, 'pin', 'overdue'],
@@ -57,11 +62,13 @@ export default async function OfficeHome() {
 
       {(counts.escalated > 0 || (appeals.n as number) > 0 || counts.conflict > 0) && (
         <div className="grid gap-2 sm:grid-cols-3">
-          {counts.escalated > 0 && <Link href="/office/complaints?escalated=1"><Alert tone="warn">⬆️ {t('office.escalatedList')}: <b>{counts.escalated}</b></Alert></Link>}
+          {counts.escalated > 0 && <Link href="/office/complaints?bucket=escalated"><Alert tone="warn">⬆️ {t('office.escalatedList')}: <b>{counts.escalated}</b></Alert></Link>}
           {(appeals.n as number) > 0 && <Link href="/office/appeals"><Alert tone="info">🔁 {t('office.appealsPending')}: <b>{appeals.n as number}</b></Alert></Link>}
           {counts.conflict > 0 && <Link href="/office/complaints?conflict=1"><Alert tone="warn">📍 {t('office.locationConflict')}: <b>{counts.conflict}</b></Alert></Link>}
         </div>
       )}
+
+      <ActionBuckets u={u} base="/office" />
 
       {u.scope === 'LOCAL_BODY' && (
         <DashboardSections d={await dashboardData(u)} base="/office" showLocalBodies={false}

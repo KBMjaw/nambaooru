@@ -1,6 +1,7 @@
 import 'server-only';
 import { sql } from './db';
 import { notify } from './notify';
+import { escalateComplaint } from './escalation';
 
 export async function slaHours(categoryId: number | null, priority: string, localBodyId: number | null) {
   const rows = await sql`
@@ -12,7 +13,8 @@ export async function slaHours(categoryId: number | null, priority: string, loca
   return { resolution: (rows[0]?.resolution_hours as number) ?? 168, inspection: (rows[0]?.inspection_hours as number) ?? 48 };
 }
 
-const OPEN = sql`status NOT IN ('CLOSED','REJECTED','DUPLICATE','DRAFT')`;
+// Paused (ON_HOLD) complaints do not run down the clock; the deadline is extended when work resumes.
+const OPEN = sql`c.status NOT IN ('CLOSED','REJECTED','DUPLICATE','DRAFT','ON_HOLD')`;
 
 /** Sends "SLA approaching" and "SLA breached" notifications once per complaint. Run by Vercel Cron and opportunistically. */
 export async function slaSweep() {
@@ -37,5 +39,35 @@ export async function slaSweep() {
       for (const r of recipients) await notify(r.id as string, tpl, { code: c.code as string }, c.id as number);
     }
   }
-  return { approaching: approaching.length, breached: breached.length };
+  // Automatic escalation: one level on breach, then one more for every further day overdue (max: higher authority)
+  const overdue = await sql`
+    SELECT c.id, c.escalation_level, LEAST(4, 1 + floor(extract(epoch FROM now() - c.sla_due_at) / 86400))::int AS target
+    FROM complaints c WHERE ${OPEN} AND c.sla_due_at IS NOT NULL AND c.sla_due_at < now()
+      AND c.escalation_level < LEAST(4, 1 + floor(extract(epoch FROM now() - c.sla_due_at) / 86400))
+    ORDER BY c.sla_due_at LIMIT 200`;
+  let escalated = 0;
+  for (const c of overdue) {
+    if (await escalateComplaint(c.id as number, null, 'Resolution deadline (SLA) crossed', c.target as number)) escalated++;
+  }
+  return { approaching: approaching.length, breached: breached.length, escalated };
+}
+
+let lastRun = 0;
+/**
+ * Opportunistic sweep from busy pages (the Hobby plan cron runs only daily). Runs at most once every
+ * 15 minutes across all instances (claimed atomically in system_settings) and never throws.
+ * Call it via next/server `after()` so it does not delay the response.
+ */
+export async function maybeSlaSweep() {
+  const now = Date.now();
+  if (now - lastRun < 60_000) return;
+  lastRun = now;
+  try {
+    await sql`INSERT INTO system_settings (key, value) VALUES ('sla.last_sweep', to_jsonb('1970-01-01T00:00:00Z'::text)) ON CONFLICT (key) DO NOTHING`;
+    const claimed = await sql`UPDATE system_settings SET value = to_jsonb(now()::text), updated_at = now()
+                              WHERE key = 'sla.last_sweep' AND (value #>> '{}')::timestamptz < now() - interval '15 minutes' RETURNING 1`;
+    if (claimed.length) await slaSweep();
+  } catch (e) {
+    console.error('sla sweep failed', e);
+  }
 }

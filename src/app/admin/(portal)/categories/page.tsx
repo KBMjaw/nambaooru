@@ -9,6 +9,8 @@ export default async function Page() {
     <div className="space-y-3">
       <h1 className="text-xl font-extrabold text-slate-800">🏷️ {t('nav.categories')}</h1>
       <MasterTable entity="complaint_categories" />
+      <h2 className="pt-4 text-lg font-extrabold text-slate-800">🔖 {t('wf.issueTypes')}</h2>
+      <MasterTable entity="complaint_issue_types" />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { FilterBar } from '@/components/office/FilterBar';
 import { ComplaintsTable } from '@/components/office/ComplaintsTable';
 import { ComplaintsMap } from '@/components/office/ComplaintsMap';
 import type { MessageKey } from '@/i18n';
+import { ACTION_BUCKETS } from '@/components/ActionBuckets';
 
 export const metadata = { title: 'Complaints' };
 
@@ -14,6 +15,7 @@ const BUCKET_LABEL: Record<string, MessageKey> = {
   new: 'office.new', review: 'office.pendingReview', inspection: 'office.inspectionPending', verified: 'office.readyToAssign', assigned: 'office.assigned',
   progress: 'office.inProgress', verification: 'office.awaitingVerification', completed: 'office.completed', rejected: 'office.rejected',
   duplicate: 'office.duplicate', overdue: 'office.overdue',
+  ...Object.fromEntries(ACTION_BUCKETS.map(([b, l]) => [b, l])),
 };
 
 export default async function OfficeComplaints({ searchParams }: { searchParams: Promise<Filters & { view?: string }> }) {
@@ -40,6 +42,12 @@ export default async function OfficeComplaints({ searchParams }: { searchParams:
           </div>
         )}
       </div>
+      <nav className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 text-sm">
+        <Link href="/office/complaints" className={`shrink-0 rounded-full border px-3 py-1 font-semibold ${!f.bucket ? 'border-navy-700 bg-navy-700 text-white' : 'border-slate-300 bg-white'}`}>{t('common.all')}</Link>
+        {ACTION_BUCKETS.map(([b, l, , icon]) => (
+          <Link key={b} href={`/office/complaints?bucket=${b}`} className={`shrink-0 rounded-full border px-3 py-1 font-semibold ${f.bucket === b ? 'border-navy-700 bg-navy-700 text-white' : 'border-slate-300 bg-white'}`}>{icon} {t(l)}</Link>
+        ))}
+      </nav>
       <FilterBar f={f} opts={opts as never} lang={lang} action="/office/complaints" />
       <div className="card p-3">
         {view === 'map' ? <ComplaintsMap items={markers} height={520} /> : (

@@ -4,6 +4,7 @@ import { getUser } from '@/lib/auth';
 import { complaintScope } from '@/lib/scope';
 import { forbidden, notFound, unauthorized } from '@/lib/errors';
 
+const CITIZEN_KINDS = ['CITIZEN', 'COMPLETION', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'];
 const SAFE_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 
 /** Evidence is never public: served only to the complaint owner or to officials whose jurisdiction covers the complaint. */
@@ -25,7 +26,8 @@ export const GET = route<{ params: Promise<{ id: string }> }>(async (_req, { par
     const citizen = await getUser('PUBLIC');
     if (!staff && !citizen) throw unauthorized();
     // Citizens: only the person who reported the complaint. Supporters see the public summary, never evidence.
-    if (citizen && citizen.id === e.citizen_id) allowed = true;
+    // Internal field records (inspection, verification, action work) stay with officials.
+    if (citizen && citizen.id === e.citizen_id && CITIZEN_KINDS.includes(e.kind as string)) allowed = true;
   }
   if (!allowed) throw forbidden();
   // Only media types that passed magic-byte sniffing at upload are ever served; anything else is sent as a download.

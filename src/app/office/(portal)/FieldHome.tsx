@@ -5,7 +5,8 @@ import { getT } from '@/i18n/server';
 import { fmtDate, navigateLink } from '@/lib/format';
 import { StatusBadge, PriorityBadge } from '@/components/badges';
 import { ActionForm } from '@/components/office/ActionForm';
-import { Empty } from '@/components/ui';
+import { Empty, Alert } from '@/components/ui';
+import type { MessageKey } from '@/i18n';
 
 /** Field staff mobile view — action-oriented, no admin dashboards. */
 export async function FieldHome() {
@@ -14,14 +15,17 @@ export async function FieldHome() {
   const works = await sql`
     SELECT a.id AS assignment_id, a.status AS a_status, a.purpose, a.due_at, a.priority AS a_priority, a.note, a.created_at AS assigned_at,
            b.full_name AS assigned_by, c.code, c.status, c.priority, c.summary_en, c.summary_ta, c.latitude, c.longitude, c.landmark,
+           c.on_hold_reason, c.on_hold_note, c.escalation_level,
+           (SELECT ce.verification_notes FROM completion_evidence ce WHERE ce.complaint_id = c.id AND ce.verification_status = 'SENT_BACK' ORDER BY ce.verified_at DESC LIMIT 1) AS rework_note,
            cat.icon, cat.name_en, cat.name_ta, w.ward_number, w.center_lat, w.center_lng,
            COALESCE(s.name_en, c.street_text) AS street, COALESCE(s.name_ta, c.street_text) AS street_ta,
            (SELECT e.id FROM complaint_evidence e WHERE e.complaint_id = c.id AND e.kind = 'CITIZEN' AND e.media_type = 'PHOTO' ORDER BY e.id LIMIT 1) AS photo_id
     FROM assignments a JOIN complaints c ON c.id = a.complaint_id JOIN users b ON b.id = a.assigned_by
     LEFT JOIN complaint_categories cat ON cat.id = c.category_id LEFT JOIN wards w ON w.id = c.ward_id LEFT JOIN streets s ON s.id = c.street_id
     WHERE a.assigned_to = ${u.id} AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS')
-      AND ((a.purpose = 'WORK' AND c.status IN ('ASSIGNED','IN_PROGRESS')) OR (a.purpose = 'INSPECTION' AND c.status = 'SITE_INSPECTION'))
-    ORDER BY CASE c.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, a.due_at NULLS LAST, a.created_at`;
+      AND ((a.purpose = 'WORK' AND a.assignee_role IN ('PRIMARY','SUPPORT') AND c.status IN ('ASSIGNED','IN_PROGRESS','ON_HOLD','REWORK_REQUIRED'))
+           OR (a.purpose = 'INSPECTION' AND c.status = 'SITE_INSPECTION'))
+    ORDER BY (c.status = 'REWORK_REQUIRED') DESC, (c.status = 'ON_HOLD'), CASE c.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, a.due_at NULLS LAST, a.created_at`;
   // Work items (complaint actions) where this worker is on the team — primary or supporting
   const tasks = await sql`
     SELECT ca.id, ca.title, ca.status, ca.priority, ca.due_at, x.assignee_role, c.code, cat.icon, w.ward_number
@@ -31,7 +35,9 @@ export async function FieldHome() {
     ORDER BY CASE ca.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, ca.due_at NULLS LAST`;
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
   const inspections = works.filter((w) => w.purpose === 'INSPECTION');
-  const jobs = works.filter((w) => w.purpose === 'WORK');
+  const rework = works.filter((w) => w.purpose === 'WORK' && w.status === 'REWORK_REQUIRED');
+  const jobs = works.filter((w) => w.purpose === 'WORK' && ['ASSIGNED', 'IN_PROGRESS'].includes(w.status as string));
+  const held = works.filter((w) => w.purpose === 'WORK' && w.status === 'ON_HOLD');
 
   const card = (w: (typeof works)[number]) => {
     const lat = (w.latitude ?? w.center_lat) as number | null;
@@ -40,6 +46,8 @@ export async function FieldHome() {
     return (
       <li key={w.assignment_id as number} className={`card overflow-hidden ${w.a_status === 'PENDING' ? 'ring-2 ring-amber-300' : ''}`}>
         {w.a_status === 'PENDING' && <div className="bg-amber-100 px-4 py-1.5 text-sm font-bold text-amber-900">🆕 {t('field.newWork')}</div>}
+        {w.status === 'REWORK_REQUIRED' && <div className="px-3 pt-3"><Alert tone="error">↩️ <b>{t('status.REWORK_REQUIRED')}</b>{w.rework_note ? `: ${w.rework_note}` : ''}</Alert></div>}
+        {w.status === 'ON_HOLD' && <div className="px-3 pt-3"><Alert tone="warn">⏸️ <b>{t(`hold.${w.on_hold_reason}` as MessageKey)}</b>{w.on_hold_note ? `: ${w.on_hold_note}` : ''}</Alert></div>}
         <div className="flex gap-3 p-4">
           {w.photo_id ? <img src={`/api/evidence/${w.photo_id}`} alt="" className="h-20 w-20 shrink-0 rounded-xl object-cover" /> : <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-leaf-50 text-4xl">{w.icon as string}</span>}
           <div className="min-w-0 flex-1 space-y-1">
@@ -61,14 +69,18 @@ export async function FieldHome() {
             <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="inspect" label={t('field.inspect')} icon="🔍" tone="btn-primary" fields={['outcome', 'notes', 'photoRequired', 'gpsRequired']} block /></div>
           ) : (
             <>
-              {w.a_status === 'PENDING' && <ActionForm code={w.code as string} action="accept" label={t('field.accept')} icon="👍" tone="btn-navy" />}
-              {w.status === 'ASSIGNED' && <ActionForm code={w.code as string} action="start" label={t('field.start')} icon="▶️" tone="btn-primary" />}
+              {w.a_status === 'PENDING' && ['ASSIGNED', 'REWORK_REQUIRED'].includes(w.status as string) && <ActionForm code={w.code as string} action="accept" label={t('field.accept')} icon="👍" tone="btn-navy" />}
+              {['ASSIGNED', 'REWORK_REQUIRED'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="start" label={t(w.status === 'REWORK_REQUIRED' ? 'wf.startRework' : 'field.start')} icon="▶️" tone="btn-primary" fields={['photo', 'gps', 'note']} hint={t('wf.beforePhotoHint')} block /></div>}
               {w.status === 'IN_PROGRESS' && (
                 <>
+                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('field.complete')} icon="✅" tone="btn-primary" fields={['notes', 'photoRequired', 'gpsRequired', 'submitToggle']} block /></div>
                   <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['progress', 'notes', 'photo', 'gps']} block /></div>
-                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('field.complete')} icon="✅" tone="btn-primary" fields={['notes', 'photoRequired', 'gpsRequired']} block /></div>
                 </>
               )}
+              {['ASSIGNED', 'IN_PROGRESS'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} block /></div>}
+              {['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="hold" label={t('wf.hold')} icon="⏸️" tone="btn-ghost" fields={['holdReason', 'note']} block /></div>}
+              {w.status === 'ON_HOLD' && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="resume" label={t('wf.resume')} icon="▶️" tone="btn-primary" fields={['note']} block /></div>}
+              {w.status !== 'ON_HOLD' && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="note" label={t('wf.addNote')} icon="📝" tone="btn-ghost" fields={['notes', 'photo']} block /></div>}
             </>
           )}
         </div>
@@ -93,8 +105,14 @@ export async function FieldHome() {
       {inspections.length > 0 && (
         <section><h2 className="mb-2 font-bold text-violet-800">🔍 {t('field.inspections')} ({inspections.length})</h2><ul className="space-y-3">{inspections.map(card)}</ul></section>
       )}
+      {rework.length > 0 && (
+        <section><h2 className="mb-2 font-bold text-red-700">↩️ {t('wf.bucket.rework')} ({rework.length})</h2><ul className="space-y-3">{rework.map(card)}</ul></section>
+      )}
       {jobs.length > 0 && (
         <section><h2 className="mb-2 font-bold text-navy-800">🛠️ {t('office.worksToDo')} ({jobs.length})</h2><ul className="space-y-3">{jobs.map(card)}</ul></section>
+      )}
+      {held.length > 0 && (
+        <section><h2 className="mb-2 font-bold text-slate-700">⏸️ {t('wf.bucket.hold')} ({held.length})</h2><ul className="space-y-3">{held.map(card)}</ul></section>
       )}
     </div>
   );

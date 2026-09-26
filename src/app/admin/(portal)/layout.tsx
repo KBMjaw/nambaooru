@@ -3,6 +3,8 @@ import { getT } from '@/i18n/server';
 import { PortalShell, type NavItem } from '@/components/PortalShell';
 import type { AddItem } from '@/components/admin/AddMenu';
 import type { MessageKey } from '@/i18n';
+import { sql } from '@/lib/db';
+import { NotifPoller } from '@/components/NotifPoller';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +29,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   add('masterdata.manage', '/admin/templates', 'nav.templates', '✉️');
   add(['settings.manage', 'masterdata.manage', 'language.manage'], '/admin/settings', 'nav.settings', '⚙️');
   add(['audit.view', 'audit.manage'], '/admin/audit', 'nav.audit', '🧾');
+  const [unread] = await sql`SELECT count(*)::int AS n FROM notifications WHERE user_id = ${u.id} AND read_at IS NULL AND channel = 'IN_APP'`;
+  nav.push({ href: '/admin/notifications', label: t('nav.notifications'), icon: '🔔', badge: unread.n as number });
   nav.push({ href: '/admin/profile', label: t('nav.profile'), icon: '👤' });
 
   // Central "+ Add" menu — only what this user is allowed to create
@@ -44,6 +48,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <PortalShell portal="ADMIN" tone="slate" title={t('app.name')} subtitle={t('portal.admin')} userName={u.fullName}
       roleLabel={lang === 'ta' ? u.roleNameTa : u.roleNameEn} nav={nav} addItems={addItems}>
+      <NotifPoller portal="ADMIN" unread={unread.n as number} />
       {children}
     </PortalShell>
   );

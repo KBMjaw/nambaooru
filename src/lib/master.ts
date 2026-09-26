@@ -136,6 +136,17 @@ export const ENTITIES: Record<string, Entity> = {
       { key: 'keywords', label: 'Extra NLP keywords (Tamil/Tanglish/English)', type: 'array', list: false }, { key: 'sort_order', label: 'Order', type: 'number' }, STATUS,
     ],
   },
+  complaint_issue_types: {
+    table: 'complaint_issue_types', title: 'Issue Types (sub-categories)', perm: 'masterdata.manage', pk: 'id', pkType: 'int', order: 'category_id, sort_order', search: ['name_en', 'name_ta', 'code'], statusCol: ACTIVE, filterBy: 'category_id',
+    refLabel: 't.name_en',
+    cols: [
+      { key: 'category_id', label: 'Category', type: 'ref', ref: 'complaint_categories', required: true },
+      { key: 'code', label: 'Code', type: 'text', required: true, readOnlyOnEdit: true },
+      { key: 'name_en', label: 'Name (EN)', type: 'text', required: true }, { key: 'name_ta', label: 'Name (TA)', type: 'text', required: true },
+      { key: 'default_priority', label: 'Default priority', type: 'select', options: PRIORITIES, nullable: true },
+      { key: 'keywords', label: 'Keywords for auto-detection', type: 'array', list: false }, { key: 'sort_order', label: 'Order', type: 'number' }, STATUS,
+    ],
+  },
   sla_rules: {
     table: 'sla_rules', title: 'SLA Rules', perm: 'masterdata.manage', pk: 'id', pkType: 'int', order: 'category_id NULLS FIRST, priority', search: [], statusCol: ACTIVE,
     cols: [

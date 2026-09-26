@@ -2,6 +2,7 @@ import { requirePageUser, has } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { getT } from '@/i18n/server';
 import { PortalShell, type NavItem } from '@/components/PortalShell';
+import { NotifPoller } from '@/components/NotifPoller';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,7 @@ export default async function OfficeLayout({ children }: { children: React.React
   const lbName = lb ? (lang === 'ta' ? lb.name_ta ?? lb.name_en : lb.name_en) : '';
   return (
     <PortalShell portal="OFFICE" title={t('app.name')} subtitle={`${t('portal.office')}${lbName ? ` · ${lbName}` : ''}`} userName={u.fullName} roleLabel={lang === 'ta' ? u.roleNameTa : u.roleNameEn} nav={nav}>
+      <NotifPoller portal="OFFICE" unread={n.n as number} />
       {children}
     </PortalShell>
   );

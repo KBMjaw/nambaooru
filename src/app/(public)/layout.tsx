@@ -1,3 +1,4 @@
+import { NotifPoller } from '@/components/NotifPoller';
 import Link from 'next/link';
 import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
@@ -32,6 +33,7 @@ export default async function PublicLayout({ children }: { children: React.React
           </div>
         </div>
       </header>
+      {user && <NotifPoller portal="PUBLIC" unread={unread} />}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-5">{children}</main>
       <footer className="border-t border-slate-200 bg-white/60 px-4 py-5 text-center text-xs text-slate-500">
         <p>{t('footer.privacy')}</p>

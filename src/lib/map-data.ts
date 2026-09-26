@@ -15,7 +15,7 @@ export async function mapComplaints(u: AuthUser, f: Filters = {}, openOnly = fal
     LEFT JOIN wards w ON w.id = c.ward_id
     LEFT JOIN streets s ON s.id = c.street_id
     JOIN local_bodies lb ON lb.id = c.local_body_id
-    WHERE (${complaintScope(u)}) AND ${filterSql(f)} ${openOnly ? sql`AND c.status NOT IN ('CLOSED','REJECTED','DUPLICATE')` : sql``}
+    WHERE (${complaintScope(u)}) AND ${filterSql(f, u)} ${openOnly ? sql`AND c.status NOT IN ('CLOSED','REJECTED','DUPLICATE')` : sql``}
     ORDER BY c.created_at DESC LIMIT 1000`;
   return rows.filter((r) => r.lat != null).map((r) => ({
     code: r.code as string, status: r.status as string, priority: r.priority as string, icon: r.icon as string, category_en: r.category_en as string,

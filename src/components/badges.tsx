@@ -14,6 +14,9 @@ const STATUS_TONE: Record<string, string> = {
   ASSIGNED: 'bg-blue-100 text-blue-800',
   IN_PROGRESS: 'bg-amber-100 text-amber-800',
   WORK_COMPLETED: 'bg-lime-100 text-lime-800',
+  ON_HOLD: 'bg-slate-200 text-slate-800',
+  VERIFICATION_PENDING: 'bg-teal-100 text-teal-800',
+  REWORK_REQUIRED: 'bg-rose-100 text-rose-800',
   COMPLETION_VERIFIED: 'bg-emerald-100 text-emerald-800',
   CLOSED: 'bg-leaf-100 text-leaf-800',
   REOPENED: 'bg-fuchsia-100 text-fuchsia-800',
@@ -38,6 +41,6 @@ export function PriorityBadge({ priority }: { priority: string }) {
 
 export const STATUS_COLOR: Record<string, string> = {
   SUBMITTED: '#64748b', AI_CLASSIFIED: '#0284c7', INITIAL_REVIEW: '#4f46e5', SITE_INSPECTION: '#7c3aed', VERIFIED: '#0d9488',
-  REJECTED: '#dc2626', DUPLICATE: '#ea580c', ASSIGNED: '#2563eb', IN_PROGRESS: '#d97706', WORK_COMPLETED: '#65a30d',
+  REJECTED: '#dc2626', DUPLICATE: '#ea580c', ASSIGNED: '#2563eb', IN_PROGRESS: '#d97706', WORK_COMPLETED: '#65a30d', ON_HOLD: '#64748b', VERIFICATION_PENDING: '#0d9488', REWORK_REQUIRED: '#e11d48',
   COMPLETION_VERIFIED: '#059669', CLOSED: '#1f7a3a', REOPENED: '#c026d3',
 };

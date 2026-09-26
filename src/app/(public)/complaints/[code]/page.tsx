@@ -75,22 +75,28 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
   const canAppeal = owner && ['REJECTED', 'DUPLICATE', 'CLOSED'].includes(c.status as string) && !pendingAppeal;
   const overdue = c.sla_due_at && new Date(c.sla_due_at as string) < new Date() && !['CLOSED', 'REJECTED', 'DUPLICATE'].includes(c.status as string);
   const publicHistory = d.history.filter((h) => h.public_note && h.note);
-  const evidence = d.evidence;
+  // Citizens see their own evidence and the completion photos; internal field / verification evidence stays internal
+  const evidence = d.evidence.filter((e) => ['CITIZEN', 'COMPLETION', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'].includes(e.kind as string));
+  const latest = [...d.history].reverse().find((h) => h.public_note);
+  const finished = ['CLOSED', 'REJECTED', 'DUPLICATE'].includes(c.status as string);
 
   const rows: [string, React.ReactNode][] = [
     [t('complaint.id'), <span key="id" className="font-mono font-bold">{c.code as string}</span>],
-    [t('complaint.category'), `${c.icon ?? ''} ${L(c.category_en, c.category_ta)}`],
+    [t('complaint.category'), `${c.icon ?? ''} ${L(c.category_en, c.category_ta)}${c.issue_en ? ` › ${L(c.issue_en, c.issue_ta)}` : ''}`],
     [t('complaint.location'), `📍 ${location || '—'}`],
     [t('complaint.submitted'), fmtDateTime(c.submitted_at as string, lang)],
     [t('complaint.status'), <StatusBadge key="st" status={c.status as string} />],
-    [t('complaint.department'), L(c.dept_en, c.dept_ta) || '—'],
-    [t('complaint.assignedOfficer'), c.assigned_name ? `${c.assigned_name} (${L(c.assigned_role_en, c.assigned_role_ta)})` : '—'],
+    [t('wf.responsibleDept'), L(c.dept_en, c.dept_ta) || '—'],
+    [t('wf.responsibleOfficer'), c.assigned_name && !finished ? `${c.assigned_name} (${L(c.assigned_role_en, c.assigned_role_ta)})` : '—'],
+    [t('wf.latestAction'), latest ? `${latest.note ? latest.note : t(`status.${latest.to_status}` as MessageKey)} · ${fmtDateTime(latest.created_at as string, lang)}` : '—'],
+    [t('wf.lastUpdated'), fmtDateTime(c.updated_at as string, lang)],
     [t('complaint.inspection'), lastInspection ? `${t(`outcome.${lastInspection.outcome}` as MessageKey)} · ${fmtDate(lastInspection.inspected_at as string, lang)}` : c.status === 'SITE_INSPECTION' ? t('complaint.pending') : '—'],
     [t('complaint.progress'), d.progress != null ? (
       <span key="p" className="flex items-center gap-2"><span className="h-2 w-24 overflow-hidden rounded-full bg-slate-200"><span className="block h-full bg-leaf-500" style={{ width: `${d.progress}%` }} /></span>{d.progress}%</span>
     ) : '—'],
     [t('complaint.expected'), <span key="exp" className={overdue ? 'font-bold text-red-600' : ''}>{fmtDate(c.sla_due_at as string, lang)}{overdue ? ` · ${t('complaint.overdue')}` : ''}</span>],
     [t('complaint.closedOn'), c.closed_at ? fmtDateTime(c.closed_at as string, lang) : '—'],
+    ...(finished ? [[t('wf.resolution'), c.resolution_type ? t(`res.${c.resolution_type}` as MessageKey) : '—'] as [string, React.ReactNode]] : []),
   ];
 
   return (
@@ -107,6 +113,18 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
         {(c.supporters_count as number) > 0 && <p className="mt-2 text-sm font-semibold text-navy-700">👥 {t('complaint.supporters', { n: c.supporters_count as number })}</p>}
       </div>
 
+      {c.status === 'ON_HOLD' && (
+        <div className="card border-amber-200 bg-amber-50 p-4 text-amber-900">
+          <p className="font-bold">⏸️ {t('status.ON_HOLD')}: {t(`hold.${c.on_hold_reason}` as MessageKey)}</p>
+          <p className="text-sm">{t('wf.holdCitizenNote')}</p>
+        </div>
+      )}
+      {c.status === 'CLOSED' && c.resolution_notes && (
+        <div className="card border-leaf-200 bg-leaf-50 p-4 text-leaf-900">
+          <p className="font-bold">✅ {t('res.RESOLVED')}</p>
+          <p className="text-sm">{c.resolution_notes as string}</p>
+        </div>
+      )}
       {rejected && (
         <div className="card border-red-200 bg-red-50 p-4">
           <p className="font-bold text-red-800">{t(`status.${c.status}` as MessageKey)} — {t('complaint.rejectedReason')}: {reasonKey ? t(reasonKey) : '—'}</p>

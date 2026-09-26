@@ -7,6 +7,7 @@ import { mapComplaints } from '@/lib/map-data';
 import { ComplaintsTable } from '@/components/office/ComplaintsTable';
 import { ComplaintsMap } from '@/components/office/ComplaintsMap';
 import { Section } from '@/components/ui';
+import { ACTION_BUCKETS } from '@/components/ActionBuckets';
 
 /** State-wide complaint oversight. Admins can assign / reassign and manage actions from the detail page; field decisions stay with officials. */
 export default async function AdminComplaints({ searchParams }: { searchParams: Promise<Filters> }) {
@@ -30,7 +31,7 @@ export default async function AdminComplaints({ searchParams }: { searchParams: 
         <select name="lb" defaultValue={f.lb ?? ''} className="input"><option value="">{t('users.localBody')}: {t('common.all')}</option>
           {lbs.map((l) => <option key={l.id as number} value={l.id as number}>{L(l.name_en, l.name_ta)}</option>)}</select>
         <select name="bucket" defaultValue={f.bucket ?? ''} className="input"><option value="">{t('users.status')}: {t('common.all')}</option>
-          {[['open', t('office.pending')], ['active', t('office.inProgress')], ['completed', t('office.completed')], ['overdue', t('office.overdue')], ['high', t('admin.highPriority')], ['new', t('office.new')], ['inspection', t('office.inspectionPending')], ['rejected', t('office.rejected')]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          {[['open', t('office.pending')], ['active', t('office.inProgress')], ['completed', t('office.completed')], ['overdue', t('office.overdue')], ['high', t('admin.highPriority')], ['new', t('office.new')], ['inspection', t('office.inspectionPending')], ['rejected', t('office.rejected')], ...ACTION_BUCKETS.filter(([b]) => !['new', 'overdue'].includes(b)).map(([b, l]) => [b, t(l)])].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         <select name="category" defaultValue={f.category ?? ''} className="input"><option value="">{t('office.byCategory')}: {t('common.all')}</option>
           {cats.map((c) => <option key={c.code as string} value={c.code as string}>{c.icon as string} {L(c.name_en, c.name_ta)}</option>)}</select>
         <button className="btn btn-outline">{t('office.apply')}</button>
