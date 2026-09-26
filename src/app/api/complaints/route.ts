@@ -8,7 +8,7 @@ import { badRequest } from '@/lib/errors';
 import { analyzeComplaint } from '@/lib/nlp/service';
 import { routeComplaint } from '@/lib/routing';
 import { slaHours } from '@/lib/sla';
-import { storeEvidence } from '@/lib/evidence';
+import { storeEvidence, validateFile } from '@/lib/evidence';
 import { transition } from '@/lib/workflow';
 import { notify } from '@/lib/notify';
 import { buildSummary, haversineKm, nextComplaintCode, notifyOfficials } from '@/lib/complaints';
@@ -58,6 +58,8 @@ export const POST = route(async (req) => {
   const [cat] = await sql`SELECT * FROM complaint_categories WHERE code = ${p.categoryCode} AND status = 'ACTIVE'`;
   if (!cat) throw badRequest('Invalid category');
   if (cat.evidence_required && files.length === 0) throw badRequest('report.photoNeeded');
+  // Validate every file before anything is written, so a rejected upload never leaves a complaint behind.
+  for (const f of files) await validateFile(f);
 
   // AI analysis (assistive) — recomputed server-side from the citizen's own words
   const a = await analyzeComplaint(p.text, { localBodyId: lb.id as number });

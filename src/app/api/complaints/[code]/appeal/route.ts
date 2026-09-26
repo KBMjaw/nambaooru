@@ -5,7 +5,7 @@ import { requireApiUser } from '@/lib/auth';
 import { audit } from '@/lib/audit';
 import { rateLimit } from '@/lib/ratelimit';
 import { badRequest, conflict, notFound } from '@/lib/errors';
-import { storeEvidence } from '@/lib/evidence';
+import { storeEvidence, validateFile } from '@/lib/evidence';
 import { notifyOfficials } from '@/lib/complaints';
 
 /** Citizen "Request Reconsideration" for rejected / duplicate / closed complaints — separate review workflow. */
@@ -19,6 +19,7 @@ export const POST = route<{ params: Promise<{ code: string }> }>(async (req, { p
   const files = form.getAll('evidence').filter((f): f is File => f instanceof File && f.size > 0).slice(0, 3);
 
   const [c] = await sql`SELECT id, status FROM complaints WHERE code = ${code} AND citizen_id = ${u.id}`;
+  for (const f of files) await validateFile(f); // reject bad files before the appeal is recorded
   if (!c) throw notFound();
   if (!['REJECTED', 'DUPLICATE', 'CLOSED'].includes(c.status as string)) throw badRequest('Reconsideration is only possible for rejected or closed complaints');
   const pending = await sql`SELECT 1 FROM appeals WHERE complaint_id = ${c.id} AND status = 'PENDING'`;

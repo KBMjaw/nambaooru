@@ -175,6 +175,8 @@ await up([{ data: Buffer.concat([JPG, Buffer.from('<script>alert(1)</script>')])
 await up([{ data: Buffer.from('MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff'), type: 'application/x-msdownload', name: 'x.exe' }], 'Windows executable', 400);
 const big = Buffer.alloc(Math.ceil(3.2 * 1024 * 1024)); JPG.copy(big);
 await up([{ data: big, type: 'image/jpeg', name: 'big.jpg' }], '3.2 MB photo (over 3 MB limit)', 400);
+const mine = new Set((await B.c.req('/complaints')).text.match(/NU-\d{4}-\d{6}/g) ?? []);
+ok('Evidence', 'rejected uploads leave no complaint behind (B still has exactly 1)', mine.size === 1 && mine.has(codeB), [...mine].join(','));
 const r = await A.c.req(evA);
 ok('Evidence', 'owner can view JPG with safe headers', r.status === 200 && r.headers.get('content-type') === 'image/jpeg' && r.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(r.headers.get('content-security-policy') ?? '') && /^inline; filename="evidence-\d+\.jpg"$/.test(r.headers.get('content-disposition') ?? '') && /no-store/.test(r.headers.get('cache-control') ?? ''),
   `${r.status} | ${r.headers.get('content-type')} | ${r.headers.get('content-disposition')} | ${r.headers.get('cache-control')} | csp: ${r.headers.get('content-security-policy')}`);
