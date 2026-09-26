@@ -203,7 +203,7 @@ export function WardMapEditor({ wardId, portal, canEdit, center, initialFeatures
                     </div>
                   ) : (
                     <div className="flex items-start justify-between gap-2">
-                      <button className="text-left" onClick={() => { const l = layersById.current.get(f.id) as (Leaflet.Layer & { getBounds?: () => Leaflet.LatLngBounds; getLatLng?: () => Leaflet.LatLng }) | undefined; if (l?.getBounds) mapRef.current?.fitBounds(l.getBounds(), { maxZoom: 19 }); else if (l?.getLatLng) mapRef.current?.setView(l.getLatLng(), 19); }}>
+                      <button className="min-w-0 text-left [overflow-wrap:anywhere]" onClick={() => { const l = layersById.current.get(f.id) as (Leaflet.Layer & { getBounds?: () => Leaflet.LatLngBounds; getLatLng?: () => Leaflet.LatLng }) | undefined; if (l?.getBounds) mapRef.current?.fitBounds(l.getBounds(), { maxZoom: 19 }); else if (l?.getLatLng) mapRef.current?.setView(l.getLatLng(), 19); }}>
                         <span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm" style={{ background: FEATURE_COLOR[f.feature_type] }} />
                         <b>{f.name || t(`feature.${f.feature_type}` as never)}</b> <span className="text-xs text-slate-500">{f.geometry_type}{f.radius_m ? ` · ${Math.round(f.radius_m)} m` : ''}</span>
                         {f.description && <div className="text-xs text-slate-600">{f.description}</div>}
