@@ -77,9 +77,17 @@ export async function verifyPassword(pw: string, hash: string) {
   return bcrypt.compare(pw, hash);
 }
 
+/**
+ * Sign in: a server-side session row is created and its id travels in the token (jti). The token is
+ * honoured only while that row is active, so logout revokes it server-side (see loadUser).
+ */
 export async function createSession(userId: string, portal: Portal, tokenVersion: number) {
+  await sql`DELETE FROM user_sessions WHERE user_id = ${userId} AND expires_at < now()`;
+  const [session] = await sql`INSERT INTO user_sessions (user_id, portal, expires_at)
+                              VALUES (${userId}, ${portal}, now() + make_interval(hours => ${SESSION_HOURS})) RETURNING id`;
   const token = await new SignJWT({ p: portal, tv: tokenVersion })
     .setProtectedHeader({ alg: 'HS256' })
+    .setJti(session.id as string)
     .setSubject(userId)
     .setIssuedAt()
     .setExpirationTime(`${SESSION_HOURS}h`)
@@ -96,17 +104,37 @@ export async function createSession(userId: string, portal: Portal, tokenVersion
   });
 }
 
+/** Sign out: revoke the server-side session (so a copied token stops working) and clear the cookie. */
 export async function destroySession(portal: Portal) {
   const jar = await cookies();
+  const claims = await readToken(jar.get(COOKIE[portal])?.value, portal);
+  if (claims) await sql`UPDATE user_sessions SET revoked_at = now() WHERE id = ${claims.sid} AND revoked_at IS NULL`;
   jar.delete(COOKIE[portal]);
 }
 
-async function loadUser(userId: string, portal: Portal, tv: number): Promise<AuthUser | null> {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Verify the session token's signature, issuer, audience and expiry; returns its claims or null. */
+async function readToken(token: string | undefined, portal: Portal): Promise<{ userId: string; sid: string; tv: number } | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, secret(), { issuer: 'nambaooru', audience: portal });
+    if (payload.p !== portal || typeof payload.sub !== 'string' || !UUID_RE.test(payload.sub)) return null;
+    if (typeof payload.jti !== 'string' || !UUID_RE.test(payload.jti)) return null; // tokens without a server-side session are not accepted
+    return { userId: payload.sub, sid: payload.jti, tv: Number(payload.tv) };
+  } catch {
+    return null;
+  }
+}
+
+async function loadUser(userId: string, portal: Portal, tv: number, sid: string): Promise<AuthUser | null> {
   const rows = await sql`
     SELECT u.id, u.username, u.full_name, u.mobile, u.email, u.status, u.token_version, u.preferred_language, u.must_change_password,
            r.code AS role, r.name_en AS role_en, r.name_ta AS role_ta, r.rank, r.portal, r.default_scope, r.status AS role_status,
            o.local_body_id AS o_lb, o.department_id, o.ward_id AS o_ward, o.supervisor_id,
            c.local_body_id AS c_lb, c.ward_id AS c_ward,
+           EXISTS (SELECT 1 FROM user_sessions s WHERE s.id = ${sid} AND s.user_id = u.id AND s.portal = ${portal}
+                     AND s.revoked_at IS NULL AND s.expires_at > now()) AS session_ok,
            -- Effective permissions = role permissions + active per-user GRANTs − active per-user DENYs
            COALESCE((SELECT array_agg(x.code) FROM (
                        SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = r.id
@@ -127,7 +155,7 @@ async function loadUser(userId: string, portal: Portal, tv: number): Promise<Aut
   const u = rows[0];
   if (!u) return null;
   // Authorization is derived from the database — never from the URL or the token alone.
-  if (u.status !== 'ACTIVE' || u.role_status !== 'ACTIVE' || u.token_version !== tv || u.portal !== portal) return null;
+  if (!u.session_ok || u.status !== 'ACTIVE' || u.role_status !== 'ACTIVE' || u.token_version !== tv || u.portal !== portal) return null;
   return {
     id: u.id as string,
     username: u.username as string,
@@ -154,15 +182,9 @@ async function loadUser(userId: string, portal: Portal, tv: number): Promise<Aut
 /** Resolve the signed-in user for a portal (memoised per request). */
 export const getUser = cache(async (portal: Portal): Promise<AuthUser | null> => {
   const jar = await cookies();
-  const token = jar.get(COOKIE[portal])?.value;
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, secret(), { issuer: 'nambaooru', audience: portal });
-    if (payload.p !== portal || typeof payload.sub !== 'string') return null;
-    return await loadUser(payload.sub, portal, Number(payload.tv));
-  } catch {
-    return null;
-  }
+  const claims = await readToken(jar.get(COOKIE[portal])?.value, portal);
+  if (!claims) return null;
+  return loadUser(claims.userId, portal, claims.tv, claims.sid);
 });
 
 /** For server components/pages: redirect to the portal login when not signed in. */

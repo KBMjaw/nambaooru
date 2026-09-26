@@ -39,7 +39,7 @@ export async function DashboardSections({ d, base, showPeople = true, showLocalB
         <Stat label={t('admin.assignedWork')} value={d.work.assigned_work as number} tone="navy" href={`${base}/complaints?bucket=active`} />
         <Stat label={t('admin.openActions')} value={`${d.work.open_actions as number}${(d.work.unassigned_actions as number) ? ` (${d.work.unassigned_actions} ⚠)` : ''}`} />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Section title={`🏘️ ${t('admin.wardWise')}`}>
           <BarList items={d.byWard.map((w) => ({ label: `${t('complaint.ward')} ${w.ward_number}${showLocalBodies ? ` · ${L(w.lb_en, w.lb_ta)}` : ''} (${w.open} ${t('office.pending').toLowerCase()})`, value: w.n as number, href: `${base}/ward-maps/${w.id}` }))} />
         </Section>
@@ -59,7 +59,7 @@ export async function DashboardSections({ d, base, showPeople = true, showLocalB
         </Section>
       )}
       {showPeople && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {canCitizens && (
             <Section title={`🧑 ${t('admin.recentCitizens')}`} action={<Link className="text-sm font-semibold text-navy-600" href={`${base}/citizens`}>{t('common.showMore')} →</Link>}>
               <ul className="divide-y divide-slate-100 text-sm">{d.recentCitizens.map((x) => (

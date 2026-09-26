@@ -199,6 +199,7 @@ const en = {
   'complaint.overdue': 'Overdue',
   'complaint.dueIn': 'Due',
   'complaint.supporters': '{n} others reported the same issue',
+  'complaint.publicView': 'You are following this complaint. Only its public details are shown here; photos, the description and officials’ notes are visible only to the person who reported it.',
   'complaint.duplicateOf': 'Same as complaint {code}',
   'complaint.pending': 'Pending',
   'complaint.done': 'Done',

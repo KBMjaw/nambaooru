@@ -4,7 +4,9 @@ import { getUser } from '@/lib/auth';
 import { complaintScope } from '@/lib/scope';
 import { forbidden, notFound, unauthorized } from '@/lib/errors';
 
-/** Evidence is never public: served only to the complaint owner / supporters or officials within jurisdiction. */
+const SAFE_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+
+/** Evidence is never public: served only to the complaint owner or to officials whose jurisdiction covers the complaint. */
 export const GET = route<{ params: Promise<{ id: string }> }>(async (_req, { params }) => {
   const id = Number((await params).id);
   if (!Number.isInteger(id)) throw notFound();
@@ -22,22 +24,20 @@ export const GET = route<{ params: Promise<{ id: string }> }>(async (_req, { par
   if (!allowed) {
     const citizen = await getUser('PUBLIC');
     if (!staff && !citizen) throw unauthorized();
-    if (citizen) {
-      if (citizen.id === e.citizen_id) allowed = true;
-      else if (['CITIZEN', 'COMPLETION'].includes(e.kind as string)) {
-        const s = await sql`SELECT 1 FROM complaint_supporters WHERE complaint_id = ${e.complaint_id} AND user_id = ${citizen.id}`;
-        allowed = s.length > 0;
-      }
-    }
+    // Citizens: only the person who reported the complaint. Supporters see the public summary, never evidence.
+    if (citizen && citizen.id === e.citizen_id) allowed = true;
   }
   if (!allowed) throw forbidden();
+  // Only media types that passed magic-byte sniffing at upload are ever served; anything else is sent as a download.
+  const mime = SAFE_TYPES[e.mime_type as string];
   return new Response(new Uint8Array(e.data as Buffer), {
     headers: {
-      'Content-Type': e.mime_type as string,
-      'Cache-Control': 'private, max-age=3600',
+      'Content-Type': mime ? (e.mime_type as string) : 'application/octet-stream',
+      'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-      'Content-Disposition': 'inline',
-      'Content-Security-Policy': "default-src 'none'; img-src 'self'; media-src 'self'; sandbox",
+      'Content-Disposition': `${mime ? 'inline' : 'attachment'}; filename="evidence-${e.id}.${mime ?? 'bin'}"`,
+      'Content-Security-Policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'; frame-ancestors 'none'; sandbox",
+      'Cross-Origin-Resource-Policy': 'same-origin',
     },
   });
 });

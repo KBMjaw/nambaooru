@@ -21,3 +21,21 @@ export function passwordContextIssue(pw: string, ctx: { username?: string | null
 }
 
 export const mobileSchema = z.string().regex(/^[6-9]\d{9}$/);
+
+/**
+ * Plain-text fields that end up on maps and labels (e.g. ward-map feature names). Markup, event-handler
+ * attributes, script URLs and control characters are rejected outright; the UI still renders these values
+ * as text, so this is defence in depth rather than the only barrier.
+ */
+export function unsafeTextIssue(s: string): string | null {
+  if (/[<>]/.test(s)) return 'HTML is not allowed';
+  if (/(javascript|vbscript|data)\s*:/i.test(s)) return 'Script URLs are not allowed';
+  if (/\bon[a-z]+\s*=/i.test(s)) return 'Event handler attributes are not allowed';
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s)) return 'Control characters are not allowed';
+  return null;
+}
+
+export const safeText = (max: number) => z.string().trim().max(max).superRefine((s, ctx) => {
+  const issue = unsafeTextIssue(s);
+  if (issue) ctx.addIssue({ code: 'custom', message: issue });
+});

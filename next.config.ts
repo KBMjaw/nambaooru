@@ -28,7 +28,20 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ['bcryptjs'],
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    const csp = securityHeaders.find((h) => h.key === 'Content-Security-Policy')!;
+    return [
+      // Uploaded evidence is served under a locked-down policy of its own: no scripts, no plugins, sandboxed
+      // even if opened directly. The site-wide CSP would otherwise replace it.
+      { source: '/((?!api/evidence/).*)', headers: [csp] },
+      { source: '/:path*', headers: securityHeaders.filter((h) => h !== csp) },
+      {
+        source: '/api/evidence/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'; frame-ancestors 'none'; sandbox" },
+          { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
+        ],
+      },
+    ];
   },
 };
 

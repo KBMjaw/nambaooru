@@ -26,6 +26,48 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
   }
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
   const location = [L(c.street_en ?? c.street_text, c.street_ta ?? c.street_text), c.ward_number != null ? `${t('complaint.ward')} ${c.ward_number}` : null, L(c.lb_en, c.lb_ta)].filter(Boolean).join(', ');
+
+  if (!owner) {
+    // Supporter (joined via the duplicate check or merged as a duplicate): PUBLIC information only.
+    // Never shown here: the reporter's identity or words, photos/evidence, GPS/landmark, officers' names,
+    // inspection results, internal or rejection notes, appeals.
+    const publicRows: [string, React.ReactNode][] = [
+      [t('complaint.id'), <span key="id" className="font-mono font-bold">{c.code as string}</span>],
+      [t('complaint.category'), `${c.icon ?? ''} ${L(c.category_en, c.category_ta)}`],
+      [t('complaint.location'), `📍 ${location || '—'}`],
+      [t('complaint.submitted'), fmtDate(c.submitted_at as string, lang)],
+      [t('complaint.status'), <StatusBadge key="st" status={c.status as string} />],
+      [t('complaint.department'), L(c.dept_en, c.dept_ta) || '—'],
+      [t('complaint.expected'), fmtDate(c.sla_due_at as string, lang)],
+      [t('complaint.closedOn'), c.closed_at ? fmtDate(c.closed_at as string, lang) : '—'],
+    ];
+    return (
+      <div className="mx-auto max-w-3xl space-y-4">
+        <Link href="/complaints" className="text-sm font-semibold text-navy-600">← {t('nav.myComplaints')}</Link>
+        <div className="card p-4 sm:p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-3xl" aria-hidden>{c.icon as string}</span>
+            <h1 className="text-xl font-extrabold text-navy-800">{L(c.title_en, c.title_ta)}</h1>
+            <StatusBadge status={c.status as string} />
+          </div>
+          {(c.supporters_count as number) > 0 && <p className="mt-2 text-sm font-semibold text-navy-700">👥 {t('complaint.supporters', { n: c.supporters_count as number })}</p>}
+          <p className="mt-2 text-sm text-slate-500">{t('complaint.publicView')}</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-5">
+          <Section className="md:col-span-3">
+            <dl className="divide-y divide-slate-100 text-sm">
+              {publicRows.map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-4 py-2.5"><dt className="text-slate-500">{k}</dt><dd className="text-right font-semibold text-slate-800">{v}</dd></div>
+              ))}
+            </dl>
+          </Section>
+          <Section title={t('complaint.timeline')} className="md:col-span-2">
+            <Timeline history={d.history.map((h) => ({ to_status: h.to_status as string, created_at: h.created_at as string }))} status={c.status as string} lang={lang} />
+          </Section>
+        </div>
+      </div>
+    );
+  }
   const lastInspection = d.inspections[0];
   const rejected = c.status === 'REJECTED' || c.status === 'DUPLICATE';
   const reasonKey = c.rejection_reason ? (`reason.${c.rejection_reason}` as MessageKey) : null;
@@ -33,7 +75,7 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
   const canAppeal = owner && ['REJECTED', 'DUPLICATE', 'CLOSED'].includes(c.status as string) && !pendingAppeal;
   const overdue = c.sla_due_at && new Date(c.sla_due_at as string) < new Date() && !['CLOSED', 'REJECTED', 'DUPLICATE'].includes(c.status as string);
   const publicHistory = d.history.filter((h) => h.public_note && h.note);
-  const evidence = d.evidence.filter((e) => owner || ['CITIZEN', 'COMPLETION'].includes(e.kind as string));
+  const evidence = d.evidence;
 
   const rows: [string, React.ReactNode][] = [
     [t('complaint.id'), <span key="id" className="font-mono font-bold">{c.code as string}</span>],

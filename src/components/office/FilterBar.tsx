@@ -35,8 +35,8 @@ export function FilterBar({ f, opts, lang, action }: {
         <option value="">{t('complaint.department')}: {t('common.all')}</option>
         {opts.depts.map((d) => <option key={d.id as number} value={d.id as number}>{(lang === 'ta' ? d.name_ta : d.name_en) as string}</option>)}
       </select>
-      <label className="flex items-center gap-1 text-xs text-slate-500">{t('office.from')}<input type="date" name="from" defaultValue={f.from} className="input py-2" /></label>
-      <label className="flex items-center gap-1 text-xs text-slate-500">{t('office.to')}<input type="date" name="to" defaultValue={f.to} className="input py-2" /></label>
+      <label className="flex min-w-0 items-center gap-1 text-xs text-slate-500">{t('office.from')}<input type="date" name="from" defaultValue={f.from} className="input min-w-0 py-2" /></label>
+      <label className="flex min-w-0 items-center gap-1 text-xs text-slate-500">{t('office.to')}<input type="date" name="to" defaultValue={f.to} className="input min-w-0 py-2" /></label>
       <div className="col-span-2 flex gap-2">
         <button className="btn btn-navy flex-1">{t('office.apply')}</button>
         <a href={action} className="btn btn-outline">{t('office.reset')}</a>

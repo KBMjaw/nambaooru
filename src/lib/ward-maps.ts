@@ -5,6 +5,7 @@ import { has, type AuthUser } from './auth';
 import { audit } from './audit';
 import { badRequest, forbidden, notFound } from './errors';
 import { assertWard, complaintScope } from './scope';
+import { safeText } from './validation';
 
 /*
  * Ward map features stored as GeoJSON geometry (RFC 7946, [lng, lat]) with a bounding box for fast
@@ -68,8 +69,8 @@ export const FeatureInput = z.object({
   geometryType: z.enum(['Polygon', 'LineString', 'Point', 'Circle']),
   geometry: z.object({ type: z.string(), coordinates: z.unknown() }),
   radiusM: z.coerce.number().positive().max(20000).nullable().optional(),
-  name: z.string().trim().max(120).nullable().optional(),
-  description: z.string().trim().max(1000).nullable().optional(),
+  name: safeText(120).nullable().optional(),
+  description: safeText(1000).nullable().optional(),
 });
 
 export async function wardMapData(u: AuthUser, wardId: number) {

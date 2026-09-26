@@ -31,7 +31,7 @@ export function AnalyticsView({ a, lang, linkBase, showLocalBodies = false }: { 
           <p className="mt-1 text-xs text-slate-500">{t('office.total30')}: <b>{s.last30}</b> · {t('office.slaViolations')}: <b>{s.overdue + s.closed_late}</b></p>
         </Section>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Section title={t('office.monthlyTrend')}>
           <MonthlyColumns data={a.monthly.map((m) => ({ month: m.month as string, a: m.a as number, b: m.b as number }))}
             labels={{ a: t('status.SUBMITTED'), b: t('status.CLOSED'), table: 'Table view', month: 'Month' }} />

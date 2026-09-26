@@ -26,15 +26,24 @@ export interface EvidenceMeta {
   imageHash?: string | null;
 }
 
+const EXT: Record<'PHOTO' | 'VIDEO', string[]> = { PHOTO: ['jpg', 'jpeg', 'png', 'webp'], VIDEO: ['mp4', 'webm'] };
+// Active content that must never be stored as evidence, whatever the file claims to be
+const DANGEROUS_TYPE = /html|svg|xml|javascript|ecmascript|x-sh|x-msdownload|octet-stream\+exe/i;
+const DANGEROUS_CONTENT = ['<script', '<html', '<?php', '<svg', '<iframe', '<object', '<embed', 'javascript:'];
+
 export async function validateFile(file: File) {
   const buf = Buffer.from(await file.arrayBuffer());
   const kind = sniff(buf);
   if (!kind) throw badRequest('Unsupported or unsafe file type. Use JPG, PNG, WEBP, MP4 or WEBM.');
   if (kind.media === 'PHOTO' && buf.length > MAX_PHOTO) throw badRequest('Photo is too large (max 3 MB).');
   if (kind.media === 'VIDEO' && buf.length > MAX_VIDEO) throw badRequest('Video is too large (max 4 MB).');
-  // Reject polyglots: an image must not contain script/HTML payloads
-  const head = buf.subarray(0, Math.min(buf.length, 4096)).toString('latin1').toLowerCase();
-  if (head.includes('<script') || head.includes('<html') || head.includes('<?php')) throw badRequest('File rejected by security scan.');
+  // The declared name / type must agree with the real content (camera blobs without an extension are fine)
+  const ext = /\.([a-z0-9]{1,8})$/i.exec(file.name ?? '')?.[1]?.toLowerCase();
+  if (ext && !EXT[kind.media].includes(ext)) throw badRequest('File extension does not match its content. Use JPG, PNG, WEBP, MP4 or WEBM.');
+  if (file.type && DANGEROUS_TYPE.test(file.type)) throw badRequest('Unsupported or unsafe file type. Use JPG, PNG, WEBP, MP4 or WEBM.');
+  // Reject polyglots: a media file must not carry script/HTML payloads anywhere in it
+  const text = buf.toString('latin1').toLowerCase();
+  if (DANGEROUS_CONTENT.some((m) => text.includes(m))) throw badRequest('File rejected by security scan.');
   return { buf, ...kind };
 }
 

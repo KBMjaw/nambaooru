@@ -32,10 +32,14 @@ export async function analytics(u: AuthUser, opts: { localBodyId?: number | null
                count(*) FILTER (WHERE c.sla_due_at < now())::int AS overdue
         FROM complaints c JOIN users u ON u.id = c.assigned_to JOIN roles r ON r.id = u.role_id
         WHERE ${scope} AND c.status IN ('ASSIGNED','IN_PROGRESS','WORK_COMPLETED') GROUP BY u.id, u.full_name, r.code ORDER BY n DESC LIMIT 12`,
-    sql`SELECT to_char(m, 'Mon YY') AS month,
-               (SELECT count(*) FROM complaints c WHERE ${scope} AND date_trunc('month', c.created_at) = m)::int AS a,
-               (SELECT count(*) FROM complaints c WHERE ${scope} AND c.status = 'CLOSED' AND date_trunc('month', c.closed_at) = m)::int AS b
-        FROM generate_series(date_trunc('month', now()) - interval '5 months', date_trunc('month', now()), interval '1 month') AS m ORDER BY m`,
+    // Six-month trend: one grouped pass per series (the scope filter is evaluated twice, not once per month).
+    sql`SELECT to_char(m, 'Mon YY') AS month, COALESCE(cr.n, 0)::int AS a, COALESCE(cl.n, 0)::int AS b
+        FROM generate_series(date_trunc('month', now()) - interval '5 months', date_trunc('month', now()), interval '1 month') AS m
+        LEFT JOIN (SELECT date_trunc('month', c.created_at) AS mm, count(*) AS n FROM complaints c
+                   WHERE ${scope} AND c.created_at >= date_trunc('month', now()) - interval '5 months' GROUP BY 1) cr ON cr.mm = m
+        LEFT JOIN (SELECT date_trunc('month', c.closed_at) AS mm, count(*) AS n FROM complaints c
+                   WHERE ${scope} AND c.status = 'CLOSED' AND c.closed_at >= date_trunc('month', now()) - interval '5 months' GROUP BY 1) cl ON cl.mm = m
+        ORDER BY m`,
     sql`SELECT COALESCE(s.name_en, c.street_text) AS street, w.ward_number, cat.name_en, cat.name_ta, count(*)::int AS n
         FROM complaints c LEFT JOIN streets s ON s.id = c.street_id LEFT JOIN wards w ON w.id = c.ward_id JOIN complaint_categories cat ON cat.id = c.category_id
         WHERE ${scope} AND c.created_at > now() - interval '90 days' AND (c.street_id IS NOT NULL OR c.street_text IS NOT NULL)

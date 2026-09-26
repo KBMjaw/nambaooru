@@ -84,7 +84,7 @@ export default async function OfficeHome() {
       </div>
 
       {a && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Section title={t('office.byWard')}>
             <BarList items={a.byWard.map((w) => ({ label: `${t('complaint.ward')} ${w.ward_number}`, value: w.n as number, href: `/office/complaints?ward=${w.id}` }))} />
           </Section>

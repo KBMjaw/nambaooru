@@ -25,7 +25,7 @@ export function NotificationsList({ items, linkBase, portal = 'PUBLIC' }: { item
             <p className="font-bold text-slate-800">{lang === 'ta' ? n.title_ta : n.title_en}</p>
             <p className="text-sm text-slate-600">{lang === 'ta' ? n.body_ta : n.body_en}</p>
             <div className="mt-1 flex items-center gap-3 text-xs text-slate-400">
-              <span>{timeAgo(n.created_at, lang)}</span>
+              <span suppressHydrationWarning>{timeAgo(n.created_at, lang)}</span>
               {n.code && <Link onClick={() => !n.read_at && mark(n.id)} href={`${linkBase}/${n.code}`} className="font-semibold text-navy-600 underline">{n.code}</Link>}
               {!n.read_at && <button className="underline" onClick={() => mark(n.id)}>✓</button>}
             </div>

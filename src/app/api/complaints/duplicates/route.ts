@@ -3,6 +3,8 @@ import { route, body } from '@/lib/api';
 import { sql } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth';
 import { findDuplicates } from '@/lib/duplicates';
+import { rateLimit } from '@/lib/ratelimit';
+import { supportToken } from '@/lib/support-token';
 
 const Schema = z.object({
   categoryCode: z.string().max(40),
@@ -16,10 +18,21 @@ const Schema = z.object({
 });
 
 export const POST = route(async (req) => {
-  await requireApiUser('PUBLIC', 'complaint.create');
+  const u = await requireApiUser('PUBLIC', 'complaint.create');
+  await rateLimit(`dups:${u.id}`, 60, 3600);
   const d = await body(req, Schema);
-  const [cat] = await sql`SELECT id FROM complaint_categories WHERE code = ${d.categoryCode}`;
+  const [cat] = await sql`SELECT id, name_en, name_ta FROM complaint_categories WHERE code = ${d.categoryCode}`;
   if (!cat) return { candidates: [] };
   const candidates = await findDuplicates({ ...d, categoryId: cat.id as number });
-  return { candidates };
+  // Each offered complaint carries a token that lets this citizen, and only this citizen, join it.
+  // Offers go to a different citizen, so they carry public facts only: the stored summary (which an AI engine may
+  // phrase from the reporter's own words) is replaced by a neutral category + place description.
+  return {
+    candidates: candidates.map((c) => ({
+      ...c,
+      summaryEn: [cat.name_en, [c.street, c.wardNumber != null ? `Ward ${c.wardNumber}` : null].filter(Boolean).join(', ')].filter(Boolean).join(' at '),
+      summaryTa: [[c.streetTa, c.wardNumber != null ? `வார்டு ${c.wardNumber}` : null].filter(Boolean).join(', '), cat.name_ta].filter(Boolean).join(' – '),
+      supportToken: supportToken(u.id, c.id),
+    })),
+  };
 });

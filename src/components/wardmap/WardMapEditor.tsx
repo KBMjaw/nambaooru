@@ -8,6 +8,14 @@ import { trMsg } from '@/i18n';
 import { api } from '@/lib/client-api';
 import { Alert } from '@/components/ui';
 import { ConfirmDialog } from '@/components/Modal';
+import { escapeHtml } from '@/components/MapView';
+
+/** Tooltip content as a text node: user-supplied names are never parsed as HTML (Leaflet treats strings as innerHTML). */
+function textTip(s: string): HTMLElement {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el;
+}
 
 export interface Feature { id: number; feature_type: string; geometry_type: string; geometry: { type: string; coordinates: unknown }; radius_m: number | null; name: string | null; description: string | null; updated_by_name: string | null }
 export interface ComplaintPin { code: string; status: string; priority: string; latitude: number; longitude: number; title_en: string | null; icon: string | null }
@@ -68,9 +76,9 @@ export function WardMapEditor({ wardId, portal, canEdit, center, initialFeatures
       featLayer.current = L.featureGroup().addTo(map);
       const pins = L.layerGroup().addTo(map);
       for (const c of complaints) {
-        const icon = L.divIcon({ className: '', html: `<div class="nu-marker" style="width:26px;height:26px;background:${c.priority === 'HIGH' || c.priority === 'CRITICAL' ? '#dc2626' : '#2957a4'}">${c.icon ?? '•'}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+        const icon = L.divIcon({ className: '', html: `<div class="nu-marker" style="width:26px;height:26px;background:${c.priority === 'HIGH' || c.priority === 'CRITICAL' ? '#dc2626' : '#2957a4'}">${escapeHtml(c.icon ?? '•')}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
         const m = L.marker([c.latitude, c.longitude], { icon, pmIgnore: true } as Leaflet.MarkerOptions).addTo(pins);
-        m.bindTooltip(`${c.code} · ${c.status}`);
+        m.bindTooltip(textTip(`${c.code} · ${c.status}`));
         m.on('click', () => { window.location.href = `${complaintBase}/${encodeURIComponent(c.code)}`; });
       }
       if (canEdit) {
@@ -113,7 +121,7 @@ export function WardMapEditor({ wardId, portal, canEdit, center, initialFeatures
           layer = gj.getLayers()[0];
           const b = gj.getBounds(); bounds.push(b.getNorthEast(), b.getSouthWest());
         }
-        (layer as Leaflet.Layer & { bindTooltip: (s: string) => void }).bindTooltip(`${ICON[f.feature_type] ?? ''} ${f.name ?? f.feature_type}`);
+        (layer as Leaflet.Layer & { bindTooltip: (c: HTMLElement) => void }).bindTooltip(textTip(`${ICON[f.feature_type] ?? ''} ${f.name ?? f.feature_type}`));
         if (canEdit) {
           layer.on('pm:edit', async () => {
             const g = layerGeometry(layer);

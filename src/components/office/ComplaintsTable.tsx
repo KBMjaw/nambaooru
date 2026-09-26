@@ -37,7 +37,7 @@ export function ComplaintsTable({ rows, compact = false, base = '/office/complai
             <Link href={`${base}/${r.code}`} className="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
               <div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-xs font-bold text-navy-700">{r.code}</span><StatusBadge status={r.status} /><PriorityBadge priority={r.priority} />{flags(r)}</div>
               <div className="mt-1 text-sm font-semibold">{r.icon} {lang === 'ta' ? r.category_ta : r.category_en}</div>
-              <div className="text-xs text-slate-500">📍 {place(r)} · {timeAgo(r.created_at, lang)} · {due(r)}</div>
+              <div className="text-xs text-slate-500">📍 {place(r)} · <span suppressHydrationWarning>{timeAgo(r.created_at, lang)}</span> · {due(r)}</div>
             </Link>
           </li>
         ))}
@@ -60,7 +60,7 @@ export function ComplaintsTable({ rows, compact = false, base = '/office/complai
                 <td><StatusBadge status={r.status} /></td>
                 <td><PriorityBadge priority={r.priority} /></td>
                 {!compact && <td className="text-slate-600">{r.assigned_name ?? '—'}</td>}
-                <td className="whitespace-nowrap text-slate-500">{timeAgo(r.created_at, lang)}</td>
+                <td className="whitespace-nowrap text-slate-500" suppressHydrationWarning>{timeAgo(r.created_at, lang)}</td>
                 <td className="whitespace-nowrap">{due(r)}</td>
               </tr>
             ))}

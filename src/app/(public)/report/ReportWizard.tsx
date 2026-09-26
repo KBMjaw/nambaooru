@@ -27,7 +27,7 @@ interface Analysis {
   safety: { risk: boolean; cues_en: string[]; cues_ta: string[]; critical: boolean };
   severity: string; missing: string[]; engine: string;
 }
-interface Dup { id: number; code: string; status: string; updatedAt: string; street: string | null; streetTa: string | null; wardNumber: number | null; distanceM: number | null; supporters: number; summaryEn: string; summaryTa: string }
+interface Dup { id: number; code: string; status: string; updatedAt: string; street: string | null; streetTa: string | null; wardNumber: number | null; distanceM: number | null; supporters: number; summaryEn: string; summaryTa: string; supportToken: string }
 interface Evidence { file: File; url: string; hash: string | null; media: 'PHOTO' | 'VIDEO'; source: 'CAMERA' | 'UPLOAD'; capturedAt: string }
 type Phase = 'describe' | 'analyzing' | 'confirm' | 'evidence' | 'checking' | 'duplicates' | 'submitting' | 'done';
 interface Msg { from: 'bot' | 'user'; text: string }
@@ -198,10 +198,10 @@ export function ReportWizard({ me, categories, localBodies }: { me: Me; categori
     }
   }
 
-  async function support(code: string) {
+  async function support(code: string, token: string) {
     setPhase('submitting');
     try {
-      const r = await api<{ redirect: string }>(`/api/complaints/${code}/support`, { method: 'POST', body: {} });
+      const r = await api<{ redirect: string }>(`/api/complaints/${encodeURIComponent(code)}/support`, { method: 'POST', body: { token } });
       window.location.href = r.redirect;
     } catch (e) { setError(trMsg(t, (e as Error).message)); setPhase('duplicates'); }
   }
@@ -489,7 +489,7 @@ export function ReportWizard({ me, categories, localBodies }: { me: Me; categori
                 📍 {[L(d.street, d.streetTa), d.wardNumber != null ? `${t('complaint.ward')} ${d.wardNumber}` : null].filter(Boolean).join(', ')}
                 {d.distanceM != null && ` · ${d.distanceM} ${t('common.m')}`} · 🕒 {fmtDateTime(d.updatedAt, lang)}
               </p>
-              <button type="button" className="btn btn-navy btn-sm mt-2" onClick={() => support(d.code)}>{t('report.trackExisting')}</button>
+              <button type="button" className="btn btn-navy btn-sm mt-2" onClick={() => support(d.code, d.supportToken)}>{t('report.trackExisting')}</button>
             </div>
           ))}
           <button type="button" className="btn btn-outline w-full" onClick={() => submit(true, dups[0]?.id ?? null)}>{t('report.differentIssue')}</button>
