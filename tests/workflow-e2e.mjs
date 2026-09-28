@@ -60,6 +60,7 @@ const muthu = await login('OFFICE', 'field.muthu');
 const ward = await login('OFFICE', 'ward10.member');
 const eoP = await login('OFFICE', 'eo.perundurai');
 const sanit = await login('OFFICE', 'officer.sanitation');
+const sysadmin = await login('ADMIN', 'sysadmin');
 
 const uid = async (username) => {
   const r = await sa.req(`/api/admin/users?portal=ADMIN&q=${encodeURIComponent(username)}`);
@@ -70,6 +71,8 @@ ok('setup', 'staff user ids resolved', RAVI && MUTHU && SUP, `${!!RAVI} ${!!MUTH
 const issueTypes = (await sa.req('/api/admin/master/complaint_issue_types?portal=ADMIN&q=SL_')).json;
 const poleType = findDeep(issueTypes, (o) => o.code === 'SL_POLE_DAMAGED');
 ok('setup', 'admin-managed issue types exist (Street light › Pole damaged)', poleType?.id, poleType?.id);
+const poleSub = findDeep((await sa.req('/api/admin/master/complaint_subcategories?portal=ADMIN&q=EL_POLE')).json, (o) => o.code === 'EL_POLE');
+ok('setup', 'admin-managed sub-categories exist (Electrical › Pole)', poleSub?.id && poleType?.subcategory_id === poleSub?.id, poleSub?.id);
 
 async function citizen(label, suffix) {
   const c = new Client(); c.cookies.nu_lang = 'en';
@@ -101,6 +104,7 @@ const unread = async (c, portal) => (await c.req(`/api/notifications?portal=${po
 const notifs = async (c, portal) => (await c.req(`/api/notifications?portal=${portal}`)).json?.items ?? [];
 const hasNotif = async (c, portal, code, title) => (await notifs(c, portal)).some((n) => n.code === code && n.title_en === title);
 const page = (c, path) => c.req(path).then((r) => r.text);
+const shows = async (c, path, text) => (await page(c, path)).includes(text);
 const expect = (area, test, r, status) => ok(area, test, (Array.isArray(status) ? status : [status]).includes(r.status), `${r.status}${r.json?.message ? ` ${r.json.message}` : ''}`);
 
 async function toVerified(code) {
@@ -126,17 +130,41 @@ expect('rbac', 'EO of another local body cannot see or act (jurisdiction)', awai
 expect('rbac', 'citizen cannot call the officer action API', await act(A, S, { action: 'review' }), [401, 403]);
 expect('rbac', 'department officer of another department (Sanitation) cannot act', await act(sanit, S, { action: 'review' }), [403, 404]);
 
-expect('classify', 'EO reclassifies the issue type (Pole damaged) — officer has final authority', await act(eo, S, { action: 'classify', issueTypeId: poleType?.id, note: 'Pole is leaning' }), 200);
-ok('classify', 'new issue type shown with who changed it', (await page(eo, `/office/complaints/${S}`)).includes('Electric pole damaged'), 'checked');
+expect('classify', 'issue type from another sub-category is refused', await act(eo, S, { action: 'classify', subcategoryId: poleSub?.id, issueTypeId: issueTypes && findDeep(issueTypes, (o) => o.code === 'SL_FLICKERING')?.id }), 400);
+expect('classify', 'EO reclassifies Electrical › Pole › Pole damaged — officer has final authority', await act(eo, S, { action: 'classify', subcategoryId: poleSub?.id, issueTypeId: poleType?.id, note: 'Pole is leaning' }), 200);
+const eoSc = await page(eo, `/office/complaints/${S}`);
+ok('classify', 'category › sub-category › issue type shown after reload', eoSc.includes('Electric pole damaged') && eoSc.includes('>Pole<'), 'checked');
+ok('notify', 'citizen notified: Complaint classified', await hasNotif(A, 'PUBLIC', S, 'Complaint classified'), 'checked');
+expect('info', 'field staff cannot request information from the citizen', await act(ravi, S, { action: 'request_info', note: 'Which pole exactly?' }), [403, 404]);
+expect('info', 'EO requests more information from the citizen', await act(eo, S, { action: 'request_info', note: 'Which pole number is it? Please add a photo of the pole.' }), 200);
+ok('info', 'citizen notified: More information needed (with the question)', (await notifs(A, 'PUBLIC')).some((n) => n.code === S && n.title_en === 'More information needed' && n.body_en.includes('pole number')), 'checked');
+ok('info', 'citizen tracking page shows the question', await shows(A, `/complaints/${S}`, 'Which pole number is it?'), 'checked');
+const infoFd = new FormData(); infoFd.set('text', 'It is pole number 12, next to the temple gate');
+infoFd.append('evidence', new Blob([PNG], { type: 'image/png' }), 'pole.png');
+expect('info', 'another citizen cannot add information to this complaint', await B.req(`/api/complaints/${S}/info`, { form: infoFd }), 404);
+expect('info', 'citizen replies with details and a new photo', await A.req(`/api/complaints/${S}/info`, { form: infoFd }), 200);
+ok('notify', 'EO notified: Citizen added information', await hasNotif(eo, 'OFFICE', S, 'Citizen added information'), 'checked');
+ok('info', 'reply visible in the complaint history', await shows(eo, `/office/complaints/${S}`, 'pole number 12'), 'checked');
 expect('classify', 'classify with no change is rejected', await act(eo, S, { action: 'classify', issueTypeId: poleType?.id }), 400);
 await toVerified(S);
 ok('notify', 'citizen notified: Complaint under review', await hasNotif(A, 'PUBLIC', S, 'Complaint under review'), 'checked');
 ok('notify', 'citizen notified: Issue verified', await hasNotif(A, 'PUBLIC', S, 'Issue verified'), 'checked');
 
 expect('assign', 'ward member cannot assign', await act(ward, S, { action: 'assign', assigneeId: RAVI }), 403);
-expect('assign', 'EO assigns primary (Ravi), supporting (Muthu) and supervisor (Electrical supervisor)', await act(eo, S, { action: 'assign', assigneeId: RAVI, supportIds: [MUTHU], supervisorId: SUP, priority: 'HIGH', note: 'Replace the lamp' }), 200);
+expect('assign', 'field staff cannot assign', await act(ravi, S, { action: 'assign', assigneeId: RAVI }), [403, 404]);
+expect('assign', 'EO assigns the Electrical supervisor', await act(eo, S, { action: 'assign_supervisor', userId: SUP, note: 'Please organise the repair' }), 200);
+expect('assign', 'EO names the supervisor as verifier', await act(eo, S, { action: 'assign_verifier', userId: SUP }), 200);
+ok('notify', 'verifier notified: You are the verifier for a complaint', await hasNotif(sup, 'OFFICE', S, 'You are the verifier for a complaint'), 'checked');
+expect('assign', 'supervisor cannot assign staff of another department (Sanitation helper)', await act(sup, S, { action: 'assign', assigneeId: RAVI, supportIds: [MUTHU] }), 403);
+expect('assign', 'supervisor assigns field staff (Ravi, electrician)', await act(sup, S, { action: 'assign', assigneeId: RAVI, priority: 'HIGH', note: 'Replace the lamp' }), 200);
+expect('assign', 'EO adds a supporting helper (Muthu)', await act(eo, S, { action: 'add_support', userId: MUTHU, note: 'Ladder support' }), 200);
+expect('due', 'due date in the past is refused', await act(eo, S, { action: 'set_due', dueAt: '2020-01-01', note: 'too late' }), 400);
+expect('due', 'ward member cannot change the due date', await act(ward, S, { action: 'set_due', dueAt: '2030-01-01', note: 'x please' }), 403);
+const due = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+expect('due', 'EO sets the due date (with reason)', await act(eo, S, { action: 'set_due', dueAt: due, note: 'Lamp stock arrives Friday' }), 200);
+ok('notify', 'field staff notified: Due date changed', await hasNotif(ravi, 'OFFICE', S, 'Due date changed'), 'checked');
 const eoS1 = await page(eo, `/office/complaints/${S}`);
-ok('assign', 'team shows primary, supporting and supervisor', ['Primary', 'Supporting', 'Supervisor'].every((x) => eoS1.includes(x)), 'checked');
+ok('assign', 'team shows primary, supporting, supervisor and verifier', ['Primary', 'Supporting', 'Supervisor', 'Verifier'].every((x) => eoS1.includes(x)), 'checked');
 ok('notify', 'field staff notified: New work assigned', await hasNotif(ravi, 'OFFICE', S, 'New work assigned'), 'checked');
 ok('notify', 'supporting staff notified: New work assigned', await hasNotif(muthu, 'OFFICE', S, 'New work assigned'), 'checked');
 ok('notify', 'supervisor notified: You are supervising a complaint', await hasNotif(sup, 'OFFICE', S, 'You are supervising a complaint'), 'checked');
@@ -145,6 +173,10 @@ ok('dash', 'complaint appears in field staff "My action required"', (await page(
 
 expect('work', 'field staff accepts', await act(ravi, S, { action: 'accept' }), 200);
 expect('work', 'field staff starts work with a before-work photo + GPS', await act(ravi, S, { action: 'start', ...GPS }, 1), 200);
+ok('refresh', 'after reload the complaint shows Work in Progress', await shows(eo, `/office/complaints/${S}`, 'Work in Progress'), 'checked');
+expect('rbac', 'field staff cannot close the complaint', await act(ravi, S, { action: 'close', note: 'done' }), 403);
+expect('rbac', 'field staff not on this complaint cannot upload progress evidence', await act(await login('OFFICE', 'field.muthu').then(async (m) => { await act(eo, S, { action: 'remove_support', userId: MUTHU, note: 'temporarily off the job' }); return m; }), S, { action: 'progress', notes: 'x', ...GPS }, 1), 403);
+expect('assign', 'EO adds Muthu back as support', await act(eo, S, { action: 'add_support', userId: MUTHU }), 200);
 ok('notify', 'citizen notified: Work started', await hasNotif(A, 'PUBLIC', S, 'Work started'), 'checked');
 expect('hold', 'hold without a reason is rejected', await act(ravi, S, { action: 'hold' }), 400);
 expect('hold', 'hold with reason OTHER needs a note', await act(ravi, S, { action: 'hold', reason: 'OTHER' }), 400);
@@ -162,6 +194,8 @@ expect('work', 'field staff completes with 3 photos + GPS and submits for verifi
 ok('notify', 'citizen notified: Work done — verification pending', await hasNotif(A, 'PUBLIC', S, 'Work done — verification pending'), 'checked');
 ok('notify', 'supervisor notified: Work completed — verify', await hasNotif(sup, 'OFFICE', S, 'Work completed — verify'), 'checked');
 ok('dash', 'complaint listed under Verification pending', (await page(sup, '/office/complaints?bucket=verification')).includes(S), 'checked');
+ok('refresh', 'after reload the complaint shows Verification Pending', await shows(eo, `/office/complaints/${S}`, 'Verification Pending'), 'checked');
+ok('dash', 'verifier sees it under My action required', (await page(sup, '/office/complaints?bucket=mine')).includes(S), 'checked');
 
 expect('verify', 'field staff cannot verify their own work', await act(ravi, S, { action: 'verify_completion', decision: 'approve' }), 403);
 expect('verify', 'ward member cannot verify', await act(ward, S, { action: 'verify_completion', decision: 'approve' }), 403);
@@ -173,7 +207,9 @@ ok('dash', 'complaint listed under Rework required', (await page(eo, '/office/co
 ok('ui', 'field staff home shows the rework reason', (await page(ravi, '/office')).includes('Lamp flickers at night'), 'checked');
 expect('rework', 'field staff restarts (rework) → IN PROGRESS', await act(ravi, S, { action: 'start', note: 'Fixing flicker' }), 200);
 expect('rework', 'field staff completes again (photo + GPS)', await act(ravi, S, { action: 'complete', notes: 'Choke replaced, no flicker', ...GPS }, 1), 200);
+expect('close', 'approve + close without a closure note is refused', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', close: true }), 400);
 expect('verify', 'supervisor approves by evidence review (method A) and closes', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'Photos confirm the fix', close: true }), 200);
+ok('refresh', 'after reload the complaint shows Closed', await shows(A, `/complaints/${S}`, 'Closed'), 'checked');
 ok('notify', 'citizen notified: Resolution verified', await hasNotif(A, 'PUBLIC', S, 'Resolution verified'), 'checked');
 ok('notify', 'citizen notified: Complaint closed', await hasNotif(A, 'PUBLIC', S, 'Complaint closed'), 'checked');
 const eoS2 = await page(eo, `/office/complaints/${S}`);
@@ -188,9 +224,16 @@ const internalOnly = [...evOffice].filter((e) => !evCitizen.has(e));
 const internalFetch = internalOnly.length ? await A.req(internalOnly[internalOnly.length - 1]) : { status: 'n/a' };
 ok('evidence', 'internal field evidence (inspection / verification) is not served to the citizen', internalOnly.length > 0 && internalFetch.status === 403, `${internalOnly.length} internal, ${internalFetch.status}`);
 ok('track', 'citizen tracking: responsible department, latest action, last updated, resolution', ['Responsible department', 'Latest action', 'Last updated', 'Resolution', 'Resolved'].every((x) => citS.includes(x)), 'checked');
-ok('track', 'citizen timeline includes the Verification step', citS.includes('Verification'), 'checked');
+ok('track', 'citizen timeline shows Submitted → Acknowledged → Classified → Department → Assigned → Started → Progress → Completed → Verification → Closed',
+  ['Complaint submitted', 'Acknowledged', 'Classified', 'Department assigned', 'Officer / staff assigned', 'Work started', 'Progress updates (1)', 'Work completed', 'Verification', 'Resolved / closed'].every((x) => citS.includes(x)), 'checked');
+ok('track', 'citizen page does not show internal notes', !citS.includes('temporarily off the job') && !citS.includes('Please organise the repair'), 'checked');
+expect('feedback', 'another citizen cannot rate this complaint', await B.req(`/api/complaints/${S}/feedback`, { body: { rating: 1 } }), 404);
+expect('feedback', 'citizen rates the closed complaint 5/5', await A.req(`/api/complaints/${S}/feedback`, { body: { rating: 5, comment: 'Fixed quickly, thank you' } }), 200);
+ok('notify', 'officials notified: Citizen feedback received', await hasNotif(eo, 'OFFICE', S, 'Citizen feedback received'), 'checked');
+ok('feedback', 'rating shown to officials', await shows(eo, `/office/complaints/${S}`, 'Fixed quickly, thank you'), 'checked');
 const adminS = await page(sa, `/admin/complaints/${S}`);
-ok('audit', 'audit trail records classification, supervisor, hold, rework and verification', ['Classification / department changed', 'Supervisor assigned', 'Work put on hold', 'Verification rejected', 'Verification approved'].every((x) => adminS.includes(x)), 'checked');
+ok('audit', 'audit trail records classification, info request, supervisor, verifier, due date, hold, rework and verification',
+  ['Classification / department changed', 'More information requested', 'Citizen added information', 'Supervisor assigned', 'Verifier assigned', 'Due date changed', 'Work put on hold', 'Verification rejected', 'Verification approved', 'Citizen feedback submitted'].every((x) => adminS.includes(x)), 'checked');
 ok('audit', 'no password or hash in complaint pages', !/password|\$2[aby]\$|argon2/i.test(adminS + eoS2), 'checked');
 ok('dash', 'closed complaint listed under Closed', (await page(eo, '/office/complaints?bucket=closed')).includes(S), 'checked');
 
@@ -220,6 +263,40 @@ expect('reopen', 'reopen needs a reason', await act(eo, I, { action: 'reopen' })
 expect('reopen', 'EO reopens the invalid complaint with a reason', await act(eo, I, { action: 'reopen', note: 'Citizen gave new details' }), 200);
 ok('notify', 'citizen notified: Complaint reopened', await hasNotif(B, 'PUBLIC', I, 'Complaint reopened'), 'checked');
 ok('reopen', 'reopened complaint shows in New again', (await page(eo, '/office/complaints?bucket=new')).includes(I), 'checked');
+
+// ============================================================================ 5b. Closed → reopened → back to work → closed again
+expect('reopen', 'EO reopens the closed street-light complaint', await act(eo, S, { action: 'reopen', note: 'Light failed again after two days' }), 200);
+expect('reopen', 'EO sends it straight back to Ravi', await act(eo, S, { action: 'assign', assigneeId: RAVI, note: 'Please check again' }), 200);
+expect('reopen', 'Ravi restarts work → IN PROGRESS', await act(ravi, S, { action: 'start' }), 200);
+expect('reopen', 'Ravi completes again', await act(ravi, S, { action: 'complete', notes: 'Loose connection fixed', ...GPS }, 1), 200);
+expect('reopen', 'supervisor verifies without closing', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'OK' }), 200);
+expect('close', 'closing without a closure note is refused', await act(eo, S, { action: 'close' }), 400);
+expect('close', 'EO closes with a closure note', await act(eo, S, { action: 'close', note: 'Connection repaired and verified' }), 200);
+
+// ============================================================================ 5c. Field verification finds it cannot be verified; outside jurisdiction
+const V = await file(B, 'Street light near market not working some nights');
+await toVerified(V);
+expect('flow', `${V}: EO assigns field.ravi`, await act(eo, V, { action: 'assign', assigneeId: RAVI }), 200);
+expect('flow', `${V}: Ravi starts and completes`, await act(ravi, V, { action: 'start' }).then(() => act(ravi, V, { action: 'complete', notes: 'Checked the fitting', ...GPS }, 1)), 200);
+expect('verify', 'cannot-verify result needs a reason', await act(eo, V, { action: 'verify_completion', decision: 'cannot_verify', method: 'FIELD', ...GPS }), 400);
+expect('verify', 'EO field visit: cannot verify (problem is intermittent) → finished as Cannot verify', await act(eo, V, { action: 'verify_completion', decision: 'cannot_verify', method: 'FIELD', notes: 'Light works during the visit; fault is intermittent', ...GPS }), 200);
+ok('verify', 'citizen sees resolution Cannot verify', await shows(B, `/complaints/${V}`, 'Cannot verify'), 'checked');
+const O = await file(B, 'Street light on the national highway bypass is off');
+expect('outside', 'EO closes as Outside jurisdiction with a reason', await act(eo, O, { action: 'reject', reason: 'OUTSIDE_JURISDICTION', notes: 'Highway lighting is maintained by NHAI' }), 200);
+ok('outside', 'citizen sees Outside jurisdiction + explanation', await shows(B, `/complaints/${O}`, 'NHAI'), 'checked');
+
+// ============================================================================ 5d. Reports / exports respect jurisdiction and permissions
+const csv = await eo.req('/api/reports/complaints?portal=OFFICE&format=csv&from=2020-01-01');
+ok('export', 'EO exports CSV of their jurisdiction (contains the street-light complaint)', csv.status === 200 && csv.text.includes(S) && csv.text.includes('Complaint No.'), csv.status);
+ok('export', 'CSV has no citizen personal data', !csv.text.includes(`${TAG} Citizen`) && !csv.text.includes('temple is not working'), 'checked');
+const pdf = await eo.req('/api/reports/complaints?portal=OFFICE&format=pdf&bucket=closed');
+ok('export', 'EO exports a PDF report', pdf.status === 200 && pdf.text.startsWith('%PDF'), pdf.status);
+const csvP = await eoP.req('/api/reports/complaints?portal=OFFICE&format=csv');
+ok('export', "another local body's EO export does not include this complaint", csvP.status === 200 && !csvP.text.includes(S), csvP.status);
+ok('export', 'field staff cannot export', [403].includes((await ravi.req('/api/reports/complaints?portal=OFFICE&format=csv')).status), 'checked');
+ok('export', 'citizen cannot export', [401, 403].includes((await A.req('/api/reports/complaints?format=csv')).status), 'checked');
+const aud = await sysadmin.req('/api/admin/audit/export?portal=ADMIN');
+ok('audit', 'System Admin audit export excludes Super Admin activity and IP / device columns', aud.status === 200 && !/,SUPER_ADMIN,/.test(aud.text) && !aud.text.split('\n')[0].includes('user_agent'), aud.status);
 
 // ============================================================================ 6. Escalation (manual; automatic on --local-db)
 expect('escalate', 'escalation needs a note', await act(ward, I, { action: 'escalate' }), 400);
@@ -274,6 +351,6 @@ for (const label of ['A', 'B']) {
 }
 
 const pass = results.filter((r) => r.pass).length;
-console.log(`\n${pass}/${results.length} passed · tag ${TAG} · complaints ${[S, N, I, D].join(', ')}`);
-writeFileSync(`workflow-e2e-${TAG}.json`, JSON.stringify({ base: BASE, tag: TAG, complaints: [S, N, I, D], results }, null, 2));
+console.log(`\n${pass}/${results.length} passed · tag ${TAG} · complaints ${[S, N, I, D, V, O].join(', ')}`);
+writeFileSync(`workflow-e2e-${TAG}.json`, JSON.stringify({ base: BASE, tag: TAG, complaints: [S, N, I, D, V, O], results }, null, 2));
 process.exit(pass === results.length ? 0 : 1);

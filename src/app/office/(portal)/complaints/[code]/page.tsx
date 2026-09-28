@@ -87,6 +87,7 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
         </div>
         {c.location_conflict && <div className="mt-2"><Alert tone="warn">📍 {t('complaint.locationFlag')}: {c.location_conflict_note as string}</Alert></div>}
         {(c.escalation_level as number) > 0 && c.escalation_note && <div className="mt-2"><Alert tone="warn">⬆️ {c.escalation_note as string}</Alert></div>}
+        {c.info_requested_at && <div className="mt-2"><Alert tone="info">❓ {t('info.waiting')}: {c.info_request_note as string}</Alert></div>}
         {status === 'ON_HOLD' && <div className="mt-2"><Alert tone="warn">⏸️ {t('status.ON_HOLD')}: <b>{t(`hold.${c.on_hold_reason}` as MessageKey)}</b>{c.on_hold_note ? ` — ${c.on_hold_note}` : ''}{c.on_hold_since ? ` · ${fmtDateTime(c.on_hold_since as string, lang)}` : ''}</Alert></div>}
         {status === 'REWORK_REQUIRED' && d.completions[0]?.verification_notes && <div className="mt-2"><Alert tone="error">↩️ {t('status.REWORK_REQUIRED')}: {d.completions[0].verification_notes as string}</Alert></div>}
         {status === 'SITE_INSPECTION' && c.inspection_outcome && <div className="mt-2"><Alert tone="info">🔍 {t('office.inspectionOutcomeWaiting')}: <b>{t(`outcome.${c.inspection_outcome}` as MessageKey)}</b></Alert></div>}

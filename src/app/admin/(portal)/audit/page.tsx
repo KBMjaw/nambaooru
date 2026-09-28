@@ -67,7 +67,8 @@ export default async function Audit({ searchParams }: { searchParams: Promise<F>
     SELECT a.id, a.created_at, a.actor_role, au.full_name AS actor, au.id AS actor_id, a.action, a.entity_type, a.entity_id, tu.full_name AS target, tu.id AS target_id,
            tr.code AS target_role, a.old_value, a.new_value, a.reason, a.ip_address, a.user_agent, count(*) OVER()::int AS total
     FROM audit_logs a LEFT JOIN users au ON au.id = a.actor_id LEFT JOIN users tu ON tu.id = a.target_user_id LEFT JOIN roles tr ON tr.id = tu.role_id
-    WHERE ${auditWhere(f)} ORDER BY a.created_at DESC LIMIT 100 OFFSET ${(page - 1) * 100}`;
+    WHERE ${auditWhere(f, u)} ORDER BY a.created_at DESC LIMIT 100 OFFSET ${(page - 1) * 100}`;
+  const withNet = has(u, 'audit.manage');
   const total = (rows[0]?.total as number) ?? 0;
   const targetHref = (r: Record<string, unknown>) => (r.target_id ? (r.target_role === 'CITIZEN' ? `/admin/citizens/${r.target_id}` : `/admin/users/${r.target_id}`) : null);
   const entityHref = (r: Record<string, unknown>) => (r.entity_type === 'complaint' ? `/admin/complaints/${r.entity_id}` : r.entity_type === 'local_bodies' ? `/admin/local-bodies/${r.entity_id}` : null);
@@ -90,7 +91,7 @@ export default async function Audit({ searchParams }: { searchParams: Promise<F>
       </form>
       <div className="card overflow-x-auto">
         <table className="table-std">
-          <thead><tr><th>{t('admin.when')}</th><th>{t('admin.actor')}</th><th>{t('admin.event')}</th><th>{t('admin.target')}</th><th>{t('admin.change')}</th><th>{t('admin.reason')}</th><th>IP / {t('admin.device')}</th></tr></thead>
+          <thead><tr><th>{t('admin.when')}</th><th>{t('admin.actor')}</th><th>{t('admin.event')}</th><th>{t('admin.target')}</th><th>{t('admin.change')}</th><th>{t('admin.reason')}</th>{withNet && <th>IP / {t('admin.device')}</th>}</tr></thead>
           <tbody>
             {rows.map((r) => {
               const l = auditLabel(r.action as string);
@@ -110,7 +111,7 @@ export default async function Audit({ searchParams }: { searchParams: Promise<F>
                       : <span className="line-clamp-3" title={auditSummary(r.old_value, r.new_value)}>{auditSummary(r.old_value, r.new_value)}</span>}
                   </td>
                   <td className="max-w-[12rem] text-xs italic text-slate-600">{(r.reason as string) ?? ''}</td>
-                  <td className="text-xs text-slate-400">{(r.ip_address as string) ?? '—'}<div>{device(r.user_agent)}</div></td>
+                  {withNet && <td className="text-xs text-slate-400">{(r.ip_address as string) ?? '—'}<div>{device(r.user_agent)}</div></td>}
                 </tr>
               );
             })}

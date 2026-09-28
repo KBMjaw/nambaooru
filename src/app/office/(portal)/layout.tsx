@@ -16,6 +16,7 @@ export default async function OfficeLayout({ children }: { children: React.React
   if (!worker) nav.push({ href: '/office/complaints', label: t('nav.complaints'), icon: '📋' });
   if (has(u, 'map.view')) nav.push({ href: '/office/map', label: t('nav.map'), icon: '🗺️' });
   if (has(u, 'analytics.view')) nav.push({ href: '/office/analytics', label: t('nav.analytics'), icon: '📈' });
+  if (has(u, 'report.export')) nav.push({ href: '/office/reports', label: t('rep.title'), icon: '📑' });
   if (has(u, 'appeal.review')) nav.push({ href: '/office/appeals', label: t('nav.appeals'), icon: '🔁' });
   if (has(u, 'wardmap.view') || has(u, 'wardmap.edit')) nav.push({ href: '/office/ward-maps', label: t('admin.wardMaps'), icon: '🧭' });
   if (has(u, 'ward.manage')) nav.push({ href: '/office/wards', label: t('admin.wards'), icon: '🏘️' });

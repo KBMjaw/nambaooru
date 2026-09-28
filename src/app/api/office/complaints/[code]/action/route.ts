@@ -139,37 +139,49 @@ export const POST = route<Ctx>(async (req, { params }) => {
       if (FINAL_S.includes(status)) throw conflict(`Action not allowed while complaint is ${status}`);
       const categoryId = data.categoryId != null && data.categoryId !== '' ? z.coerce.number().int().parse(data.categoryId) : (c.category_id as number);
       const issueTypeId = data.issueTypeId != null && data.issueTypeId !== '' ? z.coerce.number().int().parse(data.issueTypeId) : null;
+      const subcategoryId = data.subcategoryId != null && data.subcategoryId !== '' ? z.coerce.number().int().parse(data.subcategoryId) : null;
       const departmentId = data.departmentId != null && data.departmentId !== '' ? z.coerce.number().int().parse(data.departmentId) : null;
       const note = str(data.note);
       const catChanged = categoryId !== c.category_id;
-      const issueChanged = issueTypeId !== (c.issue_type_id ?? null) && !(issueTypeId == null && !catChanged);
+      const issueChanged = (issueTypeId !== (c.issue_type_id ?? null) && !(issueTypeId == null && !catChanged))
+        || (subcategoryId !== (c.subcategory_id ?? null) && !(subcategoryId == null && !catChanged));
       const deptChanged = departmentId != null && departmentId !== c.department_id;
       if (!catChanged && !issueChanged && !deptChanged) throw badRequest('Nothing to change');
       if (catChanged || issueChanged) need('complaint.review');
       if (deptChanged) need('complaint.assign');
       const [cat] = await sql`SELECT id, name_en, name_ta FROM complaint_categories WHERE id = ${categoryId} AND status = 'ACTIVE'`;
       if (!cat) throw badRequest('Unknown category');
-      if (issueTypeId != null) {
-        const [it] = await sql`SELECT 1 FROM complaint_issue_types WHERE id = ${issueTypeId} AND category_id = ${categoryId} AND status = 'ACTIVE'`;
-        if (!it) throw badRequest('Issue type does not belong to this category');
+      if (subcategoryId != null) {
+        const [sc] = await sql`SELECT 1 FROM complaint_subcategories WHERE id = ${subcategoryId} AND category_id = ${categoryId} AND status = 'ACTIVE'`;
+        if (!sc) throw badRequest('Sub-category does not belong to this category');
       }
+      let issueSub: number | null = null;
+      if (issueTypeId != null) {
+        const [it] = await sql`SELECT subcategory_id FROM complaint_issue_types WHERE id = ${issueTypeId} AND category_id = ${categoryId} AND status = 'ACTIVE'`;
+        if (!it) throw badRequest('Issue type does not belong to this category');
+        issueSub = (it.subcategory_id as number | null) ?? null;
+        if (subcategoryId != null && issueSub != null && issueSub !== subcategoryId) throw badRequest('Issue type does not belong to this sub-category');
+      }
+      const newSub = subcategoryId ?? issueSub;
       let dept: Record<string, unknown> | undefined;
       if (deptChanged) {
         [dept] = await sql`SELECT id, name_en, name_ta FROM departments WHERE id = ${departmentId} AND local_body_id = ${c.local_body_id} AND status = 'ACTIVE'`;
         if (!dept) throw badRequest('Department is not part of this local body');
       }
       const suggested = catChanged ? (await routeComplaint(c.local_body_id as number, categoryId, (c.ward_id as number | null) ?? null)).departmentId : (c.suggested_department_id as number | null);
-      await sql`UPDATE complaints SET category_id = ${categoryId}, issue_type_id = ${catChanged && !issueChanged ? null : issueTypeId}, suggested_department_id = ${suggested},
+      await sql`UPDATE complaints SET category_id = ${categoryId}, issue_type_id = ${catChanged && !issueChanged ? null : issueTypeId},
+                  subcategory_id = ${catChanged && !issueChanged ? null : newSub}, suggested_department_id = ${suggested},
                   ${deptChanged ? sql`department_id = ${departmentId}, department_assigned_by = ${u.id}, department_assigned_at = now(),` : sql``} updated_at = now()
                 WHERE id = ${id}`;
-      const [names] = await sql`SELECT cat.name_en AS cat, it.name_en AS issue, d.name_en AS dept, d.name_ta AS dept_ta FROM complaints c2
+      const [names] = await sql`SELECT cat.name_en AS cat, sc.name_en AS sub, it.name_en AS issue, d.name_en AS dept, d.name_ta AS dept_ta FROM complaints c2
                                 LEFT JOIN complaint_categories cat ON cat.id = c2.category_id LEFT JOIN complaint_issue_types it ON it.id = c2.issue_type_id
+                                LEFT JOIN complaint_subcategories sc ON sc.id = c2.subcategory_id
                                 LEFT JOIN departments d ON d.id = c2.department_id WHERE c2.id = ${id}`;
-      const parts = [catChanged || issueChanged ? `Classified as ${names.cat}${names.issue ? ` › ${names.issue}` : ''}` : null, deptChanged ? `Department assigned: ${names.dept}` : null].filter(Boolean);
+      const parts = [catChanged || issueChanged ? `Classified as ${[names.cat, names.sub, names.issue].filter(Boolean).join(' › ')}` : null, deptChanged ? `Department assigned: ${names.dept}` : null].filter(Boolean);
       await addHistoryNote(id, status, u, `${parts.join('. ')}${note ? ` — ${note}` : ''}`, true);
       await audit(u, { action: 'COMPLAINT_CLASSIFIED', entityType: 'complaint', entityId: code, reason: note,
-        oldValue: { categoryId: c.category_id, issueTypeId: c.issue_type_id, departmentId: c.department_id },
-        newValue: { categoryId, issueTypeId, departmentId: deptChanged ? departmentId : c.department_id, suggestedDepartmentId: suggested } });
+        oldValue: { categoryId: c.category_id, subcategoryId: c.subcategory_id, issueTypeId: c.issue_type_id, departmentId: c.department_id },
+        newValue: { categoryId, subcategoryId: newSub, issueTypeId, departmentId: deptChanged ? departmentId : c.department_id, suggestedDepartmentId: suggested } });
       await notify(c.citizen_id as string, 'CLASSIFIED', { code, category_en: cat.name_en as string, category_ta: cat.name_ta as string, department: (names.dept as string) ?? '' }, id);
       if (deptChanged) await notifyOfficials(id, 'DEPARTMENT_ASSIGNED', { department: (dept!.name_en as string) }, { includeWardMember: false });
       break;
@@ -190,11 +202,55 @@ export const POST = route<Ctx>(async (req, { params }) => {
       break;
     }
 
+    case 'assign_verifier': {
+      // Names the official expected to verify the completed work (any official with complaint.verify can still verify)
+      need('complaint.assign');
+      if (FINAL_S.includes(status)) throw conflict(`Action not allowed while complaint is ${status}`);
+      const userId = z.string().uuid().parse(data.userId);
+      const who = await supervisorCandidate(u, userId, c.local_body_id as number);
+      const prev = await sql`UPDATE assignments SET status = 'REASSIGNED' WHERE complaint_id = ${id} AND purpose = 'WORK' AND assignee_role = 'VERIFIER' AND status IN ${sql(ACTIVE_A)} RETURNING assigned_to`;
+      await sql`INSERT INTO assignments (complaint_id, assigned_to, assigned_by, department_id, purpose, priority, due_at, note, assignee_role, status)
+                VALUES (${id}, ${userId}, ${u.id}, ${who.department_id ?? c.department_id}, 'WORK', ${c.priority}, ${c.sla_due_at}, ${str(data.note)}, 'VERIFIER', 'ACCEPTED')`;
+      await addHistoryNote(id, status, u, `Verifier assigned: ${who.full_name}${str(data.note) ? ` — ${str(data.note)}` : ''}`, false);
+      await audit(u, { action: 'VERIFIER_ASSIGNED', entityType: 'complaint', entityId: code, targetUserId: userId,
+        oldValue: { verifier: prev.map((p) => p.assigned_to) }, newValue: { verifier: userId } });
+      if (userId !== u.id) await notify(userId, 'VERIFIER_ASSIGNED', catVars, id);
+      break;
+    }
+
+    case 'set_due': {
+      need('complaint.assign');
+      if (FINAL_S.includes(status)) throw conflict(`Action not allowed while complaint is ${status}`);
+      const due = new Date(z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Pick a due date').parse(data.dueAt));
+      if (Number.isNaN(due.getTime())) throw badRequest('Pick a due date');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(data.dueAt))) due.setHours(23, 59, 0, 0);
+      if (due.getTime() < Date.now()) throw badRequest('The due date must be in the future');
+      const reason = z.string().trim().min(3, 'err.reasonRequired').max(500).parse(data.note);
+      await sql`UPDATE complaints SET sla_due_at = ${due}, sla_warned_at = NULL, sla_breached_at = NULL, updated_at = now() WHERE id = ${id}`;
+      const team = await sql`UPDATE assignments SET due_at = ${due} WHERE complaint_id = ${id} AND purpose = 'WORK' AND status IN ${sql(ACTIVE_A)} RETURNING assigned_to`;
+      await addHistoryNote(id, status, u, `Due date set to ${due.toISOString().slice(0, 10)}: ${reason}`, false);
+      await audit(u, { action: 'DUE_DATE_CHANGED', entityType: 'complaint', entityId: code, reason, oldValue: { due: c.sla_due_at }, newValue: { due } });
+      for (const x of new Set(team.map((t) => t.assigned_to as string))) if (x !== u.id) await notify(x, 'DUE_DATE_CHANGED', { code, due: due.toISOString().slice(0, 10), reason }, id);
+      break;
+    }
+
+    case 'request_info': {
+      // Ask the citizen for more details; the complaint keeps its status and the question is visible to the citizen
+      need('complaint.review');
+      if (FINAL_S.includes(status)) throw conflict(`Action not allowed while complaint is ${status}`);
+      const question = z.string().trim().min(5, 'err.reasonRequired').max(1000).parse(data.note);
+      await sql`UPDATE complaints SET info_requested_at = now(), info_request_note = ${question}, updated_at = now() WHERE id = ${id}`;
+      await addHistoryNote(id, status, u, `More information requested: ${question}`, true);
+      await audit(u, { action: 'INFO_REQUESTED', entityType: 'complaint', entityId: code, newValue: { question } });
+      await notify(c.citizen_id as string, 'INFO_REQUESTED', { code, reason: question }, id);
+      break;
+    }
+
     case 'assign':
     case 'reassign': {
       const reassign = action === 'reassign';
       need(reassign ? 'complaint.reassign' : 'complaint.assign');
-      requireStatus(...(reassign ? ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'] : ['VERIFIED']));
+      requireStatus(...(reassign ? ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'] : ['VERIFIED', 'REOPENED']));
       const assigneeId = z.string().uuid().parse(data.assigneeId);
       const supportIds = [...new Set(z.array(z.string().uuid()).max(10).parse(data.supportIds ?? []))].filter((x) => x !== assigneeId);
       const assignee = await assignableUser(u, assigneeId, false, c.local_body_id as number);
@@ -210,7 +266,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       if (reassign && !str(data.note)) throw badRequest('err.reasonRequired');
       // Field team is replaced; the supervisor stays unless a new one is chosen
       const prev = await sql`UPDATE assignments SET status = 'REASSIGNED' WHERE complaint_id = ${id} AND purpose = 'WORK' AND status IN ${sql(ACTIVE_A)}
-                             AND (assignee_role <> 'SUPERVISOR' OR ${!!supervisorId}) RETURNING assigned_to, assignee_role`;
+                             AND (assignee_role IN ('PRIMARY','SUPPORT') OR (assignee_role = 'SUPERVISOR' AND ${!!supervisorId})) RETURNING assigned_to, assignee_role`;
       await sql`INSERT INTO assignments (complaint_id, assigned_to, assigned_by, department_id, purpose, priority, due_at, note, assignee_role)
                 VALUES (${id}, ${assigneeId}, ${u.id}, ${assignee.department_id ?? c.department_id}, 'WORK', ${priority}, ${due}, ${str(data.note)}, 'PRIMARY')`;
       for (const sp of supporters) {
@@ -383,14 +439,17 @@ export const POST = route<Ctx>(async (req, { params }) => {
     case 'verify_completion': {
       need('complaint.verify');
       requireStatus('VERIFICATION_PENDING', 'WORK_COMPLETED');
-      const decision = z.enum(['approve', 'send_back']).parse(data.decision);
+      // approve / send_back (rework), or a field-visit finding that ends the complaint without work
+      const decision = z.enum(['approve', 'send_back', 'no_issue', 'cannot_verify']).parse(data.decision);
       const method = z.enum(['EVIDENCE', 'FIELD']).parse(data.method ?? 'EVIDENCE');
       const notes = str(data.notes);
       const [ce] = await sql`SELECT id, completed_by, proposed_resolution, notes FROM completion_evidence WHERE complaint_id = ${id} AND verification_status = 'PENDING' ORDER BY completed_at DESC LIMIT 1`;
       if (!ce) throw conflict('No completion evidence to verify');
       if (ce.completed_by === u.id) throw forbidden('Completion must be verified by a different official');
       const noIssue = ce.proposed_resolution === 'NO_ISSUE_FOUND';
-      if (decision === 'approve' && noIssue) need('complaint.reject');
+      if ((decision === 'approve' && noIssue) || decision === 'no_issue' || decision === 'cannot_verify') need('complaint.reject');
+      if ((decision === 'no_issue' || decision === 'cannot_verify') && (!notes || notes.length < 5)) throw badRequest('err.reasonRequired');
+      if (decision === 'approve' && data.close === true && (!notes || notes.length < 3)) throw badRequest('A closure note is required');
       // Method B: the verifier visits the site — location and notes are mandatory, photo optional
       if (method === 'FIELD') {
         if (geo.latitude == null || geo.longitude == null) throw badRequest('field.needLocation');
@@ -399,14 +458,22 @@ export const POST = route<Ctx>(async (req, { params }) => {
       if (decision === 'send_back' && (!notes || notes.length < 3)) throw badRequest('Please give a reason for sending back');
       if (status === 'WORK_COMPLETED') await transition(id, 'VERIFICATION_PENDING', u, { note: 'Submitted for verification', skipCitizenNotify: true });
       const vIds = await storeAll('VERIFICATION');
-      await sql`UPDATE completion_evidence SET verification_status = ${decision === 'approve' ? 'APPROVED' : 'SENT_BACK'}, verified_by = ${u.id}, verified_at = now(),
+      await sql`UPDATE completion_evidence SET verification_status = ${decision === 'send_back' ? 'SENT_BACK' : 'APPROVED'}, verified_by = ${u.id}, verified_at = now(),
                   verification_notes = ${notes}, verification_method = ${method}, verification_latitude = ${geo.latitude}, verification_longitude = ${geo.longitude},
                   verification_evidence_id = ${vIds[0] ?? null}
                 WHERE id = ${ce.id}`;
       const how = method === 'FIELD' ? 'field verification' : 'evidence review';
-      await audit(u, { action: decision === 'approve' ? 'VERIFICATION_APPROVED' : 'VERIFICATION_REJECTED', entityType: 'complaint', entityId: code, reason: notes,
-        newValue: { method, proposed: ce.proposed_resolution, lat: geo.latitude, lng: geo.longitude, evidenceIds: vIds } });
-      if (decision === 'approve') {
+      await audit(u, { action: decision === 'send_back' ? 'VERIFICATION_REJECTED' : 'VERIFICATION_APPROVED', entityType: 'complaint', entityId: code, reason: notes,
+        newValue: { method, decision, proposed: ce.proposed_resolution, lat: geo.latitude, lng: geo.longitude, evidenceIds: vIds } });
+      if (decision === 'no_issue' || decision === 'cannot_verify') {
+        const reason = decision === 'no_issue' ? 'NOT_FOUND' : 'CANNOT_VERIFY';
+        await transition(id, 'REJECTED', u, {
+          note: `${REASON_LABEL[reason].en} — ${how}: ${notes}`,
+          set: { rejection_reason: reason, rejection_notes: notes, resolution_notes: notes },
+          notifyVars: { reason_en: REASON_LABEL[reason].en, reason_ta: REASON_LABEL[reason].ta },
+        });
+        await sql`UPDATE assignments SET status = 'CANCELLED' WHERE complaint_id = ${id} AND status IN ${sql(ACTIVE_A)}`;
+      } else if (decision === 'approve') {
         if (noIssue) {
           await transition(id, 'REJECTED', u, {
             note: `No issue found — confirmed by ${how}${notes ? `: ${notes}` : ''}`,
@@ -436,7 +503,9 @@ export const POST = route<Ctx>(async (req, { params }) => {
     case 'close': {
       need('complaint.close');
       requireStatus('COMPLETION_VERIFIED');
-      await transition(id, 'CLOSED', u, { note: str(data.note) ?? 'Complaint closed', set: { resolution_type: 'RESOLVED', resolution_notes: str(data.note) } });
+      // Closure needs a verified completion (enforced by status) and a closure note
+      const closeNote = z.string().trim().min(3, 'A closure note is required').max(2000).parse(data.note);
+      await transition(id, 'CLOSED', u, { note: closeNote, set: { resolution_type: 'RESOLVED', resolution_notes: closeNote } });
       break;
     }
 

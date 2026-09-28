@@ -1,10 +1,18 @@
 import 'server-only';
 import { sql } from './db';
 import { AUDIT_LABELS } from './audit-labels';
+import type { AuthUser } from './auth';
 
-/** Filters for the business audit log. Login / logout events live in security_logs and never appear here. */
-export function auditWhere(f: Record<string, string | undefined>) {
+/**
+ * Filters for the business audit log. Login / logout events live in security_logs and never appear here.
+ * Only a Super Admin sees Super Admin activity (as actor or as the affected user).
+ */
+export function auditWhere(f: Record<string, string | undefined>, viewer?: AuthUser) {
   const parts = [sql`a.action NOT LIKE 'auth.%'`];
+  if (!viewer || viewer.role !== 'SUPER_ADMIN') {
+    parts.push(sql`a.actor_role IS DISTINCT FROM 'SUPER_ADMIN'`);
+    parts.push(sql`NOT EXISTS (SELECT 1 FROM users x JOIN roles xr ON xr.id = x.role_id WHERE x.id = a.target_user_id AND xr.code = 'SUPER_ADMIN')`);
+  }
   if (f.action) parts.push(sql`a.action ILIKE ${`%${f.action.slice(0, 60)}%`}`);
   if (f.group) {
     const codes = Object.entries(AUDIT_LABELS).filter(([, v]) => v.group === f.group).map(([k]) => k);

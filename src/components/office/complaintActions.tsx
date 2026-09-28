@@ -27,10 +27,11 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
   const P = { code, portal, block: true } as const;
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
 
-  const team = d.assignments.filter((a) => a.purpose === 'WORK' && ACTIVE.includes(a.status as string) && a.assignee_role !== 'SUPERVISOR');
+  const FIELD_ROLES = ['PRIMARY', 'SUPPORT'];
+  const team = d.assignments.filter((a) => a.purpose === 'WORK' && ACTIVE.includes(a.status as string) && FIELD_ROLES.includes(a.assignee_role as string));
   const supportTeam: UserOpt[] = team.filter((a) => a.assignee_role === 'SUPPORT').map((a) => ({ id: a.assigned_to as string, full_name: a.assignee_name as string, role: a.assignee_role_code as string, role_name: a.assignee_role_en as string }));
-  const myWork = d.assignments.find((a) => a.purpose === 'WORK' && a.assigned_to === u.id && a.assignee_role !== 'SUPERVISOR' && ACTIVE.includes(a.status as string));
-  const myDone = d.assignments.some((a) => a.purpose === 'WORK' && a.assigned_to === u.id && a.assignee_role !== 'SUPERVISOR' && a.status === 'COMPLETED');
+  const myWork = d.assignments.find((a) => a.purpose === 'WORK' && a.assigned_to === u.id && FIELD_ROLES.includes(a.assignee_role as string) && ACTIVE.includes(a.status as string));
+  const myDone = d.assignments.some((a) => a.purpose === 'WORK' && a.assigned_to === u.id && FIELD_ROLES.includes(a.assignee_role as string) && a.status === 'COMPLETED');
   const pending = d.completions.find((x) => x.verification_status === 'PENDING');
   const noIssue = pending?.proposed_resolution === 'NO_ISSUE_FOUND';
   const inspectors: UserOpt[] = has(u, 'complaint.inspect') ? work.staffWithSelf : work.staff;
@@ -39,13 +40,15 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
   const canCategory = has(u, 'complaint.review');
   const canDepartment = has(u, 'complaint.assign');
   if (open && (canCategory || canDepartment)) {
-    const [cats, its] = await Promise.all([
+    const [cats, subs, its] = await Promise.all([
       sql`SELECT id, name_en, name_ta, icon FROM complaint_categories WHERE status = 'ACTIVE' ORDER BY sort_order`,
-      sql`SELECT id, category_id, name_en, name_ta FROM complaint_issue_types WHERE status = 'ACTIVE' ORDER BY sort_order, id`,
+      sql`SELECT id, category_id, name_en, name_ta FROM complaint_subcategories WHERE status = 'ACTIVE' ORDER BY sort_order, id`,
+      sql`SELECT id, category_id, subcategory_id, name_en, name_ta FROM complaint_issue_types WHERE status = 'ACTIVE' ORDER BY sort_order, id`,
     ]);
     classify = {
       categories: cats.map((x) => ({ id: x.id as number, name: `${x.icon} ${L(x.name_en, x.name_ta)}` })),
-      issueTypes: its.map((x) => ({ id: x.id as number, category_id: x.category_id as number, name: L(x.name_en, x.name_ta) })),
+      subcategories: subs.map((x) => ({ id: x.id as number, category_id: x.category_id as number, name: L(x.name_en, x.name_ta) })),
+      issueTypes: its.map((x) => ({ id: x.id as number, category_id: x.category_id as number, subcategory_id: (x.subcategory_id as number | null) ?? null, name: L(x.name_en, x.name_ta) })),
       departments: work.departments.map((x) => ({ id: x.id, name: x.name_en })),
       canCategory, canDepartment,
     };
@@ -79,7 +82,9 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     nodes.push(<ActionForm key={k('review')} {...P} action="review" label={t('wf.acknowledge')} icon="🧐" tone="btn-primary" fields={['note']} />);
   if (classify)
     nodes.push(<ActionForm key={k('cls')} {...P} action="classify" label={t('wf.classify')} icon="🏷️" tone="btn-outline" fields={['classify', 'note']} classify={classify}
-      defaults={{ categoryId: String(c.category_id ?? ''), issueTypeId: String(c.issue_type_id ?? ''), departmentId: String(c.department_id ?? '') }} />);
+      defaults={{ categoryId: String(c.category_id ?? ''), subcategoryId: String(c.subcategory_id ?? ''), issueTypeId: String(c.issue_type_id ?? ''), departmentId: String(c.department_id ?? '') }} />);
+  if (open && has(u, 'complaint.review'))
+    nodes.push(<ActionForm key={k('ri')} {...P} action="request_info" label={t('wf.requestInfo')} icon="❓" tone="btn-outline" fields={['noteRequired']} hint={t('wf.requestInfoHint')} />);
   if (['INITIAL_REVIEW'].includes(status) && has(u, 'complaint.review') && !c.inspection_required)
     nodes.push(<ActionForm key={k('vd')} {...P} action="verify_direct" label={t('office.verifyWithoutInspection')} icon="✔️" tone="btn-primary" fields={['note']} />);
   if (['AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION'].includes(status) && has(u, 'complaint.schedule_inspection'))
@@ -88,15 +93,19 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     nodes.push(<ActionForm key={k('rec')} {...P} action="inspect" label={t('office.recordInspection')} icon="📝" tone="btn-primary" fields={['outcome', 'notes', 'photoRequired', 'gpsRequired']} />);
 
   // ---- Assignment ----
-  if (status === 'VERIFIED' && has(u, 'complaint.assign'))
+  if (['VERIFIED', 'REOPENED'].includes(status) && has(u, 'complaint.assign'))
     nodes.push(<ActionForm key={k('as')} {...P} action="assign" label={t('office.assign')} icon="👷" tone="btn-primary" fields={['assignee', 'supporters', 'supervisor', 'priority', 'dueAt', 'note']} users={work.staff} supervisors={work.supervisors} defaults={{ priority: c.priority as string }} />);
   if (WORK.includes(status) && has(u, 'complaint.reassign')) {
     nodes.push(<ActionForm key={k('ras')} {...P} action="reassign" label={t('office.reassign')} icon="🔄" tone="btn-outline" fields={['assignee', 'supporters', 'supervisor', 'priority', 'dueAt', 'noteRequired']} users={work.staff} supervisors={work.supervisors} defaults={{ priority: c.priority as string }} />);
     nodes.push(<ActionForm key={k('asp')} {...P} action="add_support" label={t('office.addSupport')} icon="➕" tone="btn-outline" fields={['user', 'note']} users={work.staff.filter((s) => !team.some((x) => x.assigned_to === s.id))} />);
     if (supportTeam.length) nodes.push(<ActionForm key={k('rsp')} {...P} action="remove_support" label={t('office.removeSupport')} icon="➖" tone="btn-ghost" fields={['user', 'noteRequired']} users={supportTeam} />);
   }
-  if (open && has(u, 'complaint.assign') && work.supervisors.length)
+  if (open && has(u, 'complaint.assign') && work.supervisors.length) {
     nodes.push(<ActionForm key={k('sup')} {...P} action="assign_supervisor" label={t('wf.assignSupervisor')} icon="🧑‍💼" tone="btn-outline" fields={['user', 'note']} users={work.supervisors} />);
+    nodes.push(<ActionForm key={k('ver')} {...P} action="assign_verifier" label={t('wf.assignVerifier')} icon="🔎" tone="btn-outline" fields={['user', 'note']} users={work.supervisors} />);
+  }
+  if (open && has(u, 'complaint.assign'))
+    nodes.push(<ActionForm key={k('due')} {...P} action="set_due" label={t('wf.setDue')} icon="📅" tone="btn-ghost" fields={['dueRequired', 'noteRequired']} />);
 
   // ---- Verification & closure ----
   if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && has(u, 'complaint.verify') && pending && pending.completed_by !== u.id) {
@@ -104,9 +113,13 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     if (!noIssue || has(u, 'complaint.reject'))
       nodes.push(<ActionForm key={k('vc')} {...P} action="verify_completion" label={t(noIssue ? 'wf.confirmNoIssue' : 'office.approveClose')} icon="🏁" tone="btn-primary" fields={[...approveFields]} extra={{ decision: 'approve' }} defaults={{ method: 'EVIDENCE' }} />);
     nodes.push(<ActionForm key={k('sb')} {...P} action="verify_completion" label={t('wf.sendRework')} icon="↩️" tone="btn-outline" fields={['method', 'notes']} extra={{ decision: 'send_back' }} defaults={{ method: 'EVIDENCE' }} />);
+    if (has(u, 'complaint.reject') && !noIssue) {
+      nodes.push(<ActionForm key={k('vni')} {...P} action="verify_completion" label={t('wf.verifyNoIssue')} icon="🚫" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'no_issue' }} defaults={{ method: 'FIELD' }} />);
+      nodes.push(<ActionForm key={k('vcv')} {...P} action="verify_completion" label={t('wf.verifyCannot')} icon="❔" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'cannot_verify' }} defaults={{ method: 'FIELD' }} />);
+    }
   }
   if (status === 'COMPLETION_VERIFIED' && has(u, 'complaint.close'))
-    nodes.push(<ActionForm key={k('cl')} {...P} action="close" label={t('office.close')} icon="🔒" tone="btn-primary" fields={['note']} />);
+    nodes.push(<ActionForm key={k('cl')} {...P} action="close" label={t('office.close')} icon="🔒" tone="btn-primary" fields={['noteRequired']} hint={t('wf.closeHint')} />);
   if (RESOLVABLE.includes(status) && has(u, 'complaint.reject'))
     nodes.push(<ActionForm key={k('rj')} {...P} action="reject" label={t('wf.resolveAs')} icon="⛔" tone="btn-danger" fields={['reason', 'notes']}
       defaults={c.inspection_outcome && !['VERIFIED', 'REQUIRES_HIGHER_AUTHORITY'].includes(c.inspection_outcome as string) ? { reason: c.inspection_outcome as string } : {}} />);

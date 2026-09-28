@@ -5,7 +5,7 @@ export async function getComplaintDetail(where: { code: string }) {
   const [c] = await sql`
     SELECT c.*, cat.code AS category_code, cat.name_en AS category_en, cat.name_ta AS category_ta, cat.icon, cat.inspection_required, cat.evidence_required,
            d.name_en AS dept_en, d.name_ta AS dept_ta, w.ward_number,
-           it.name_en AS issue_en, it.name_ta AS issue_ta, sd.name_en AS sdept_en, sd.name_ta AS sdept_ta, dab.full_name AS dept_assigned_by_name,
+           it.name_en AS issue_en, it.name_ta AS issue_ta, sc.name_en AS sub_en, sc.name_ta AS sub_ta, sd.name_en AS sdept_en, sd.name_ta AS sdept_ta, dab.full_name AS dept_assigned_by_name,
            rbu.full_name AS resolved_by_name, s.name_en AS street_en, s.name_ta AS street_ta,
            lb.name_en AS lb_en, lb.name_ta AS lb_ta, lb.center_lat AS lb_lat, lb.center_lng AS lb_lng,
            au.full_name AS assigned_name, ar.name_en AS assigned_role_en, ar.name_ta AS assigned_role_ta, ao.designation AS assigned_designation,
@@ -16,6 +16,7 @@ export async function getComplaintDetail(where: { code: string }) {
     LEFT JOIN complaint_categories cat ON cat.id = c.category_id
     LEFT JOIN departments d ON d.id = c.department_id
     LEFT JOIN complaint_issue_types it ON it.id = c.issue_type_id
+    LEFT JOIN complaint_subcategories sc ON sc.id = c.subcategory_id
     LEFT JOIN departments sd ON sd.id = c.suggested_department_id
     LEFT JOIN users dab ON dab.id = c.department_assigned_by
     LEFT JOIN users rbu ON rbu.id = c.resolved_by
@@ -30,7 +31,7 @@ export async function getComplaintDetail(where: { code: string }) {
     WHERE c.code = ${where.code}`;
   if (!c) return null;
   const id = c.id as number;
-  const [history, evidence, inspections, assignments, updates, completions, appeals] = await Promise.all([
+  const [history, evidence, inspections, assignments, updates, completions, appeals, feedback] = await Promise.all([
     sql`SELECT h.*, r.code AS actor_role FROM complaint_status_history h LEFT JOIN users u ON u.id = h.actor_id LEFT JOIN roles r ON r.id = u.role_id
         WHERE h.complaint_id = ${id} ORDER BY h.created_at, h.id`,
     sql`SELECT e.id, e.kind, e.media_type, e.latitude, e.longitude, e.gps_accuracy_m, e.captured_at, e.capture_source, e.created_at, e.appeal_id,
@@ -44,9 +45,10 @@ export async function getComplaintDetail(where: { code: string }) {
     sql`SELECT ce.*, u.full_name AS completed_by_name, v.full_name AS verified_by_name FROM completion_evidence ce
         JOIN users u ON u.id = ce.completed_by LEFT JOIN users v ON v.id = ce.verified_by WHERE ce.complaint_id = ${id} ORDER BY ce.completed_at DESC`,
     sql`SELECT a.*, r.full_name AS reviewer_name FROM appeals a LEFT JOIN users r ON r.id = a.reviewer_id WHERE a.complaint_id = ${id} ORDER BY a.created_at DESC`,
+    sql`SELECT rating, comment, created_at, updated_at FROM complaint_feedback WHERE complaint_id = ${id}`,
   ]);
   const progress = (updates.find((u) => u.progress_pct != null)?.progress_pct as number | undefined) ?? (['WORK_COMPLETED', 'VERIFICATION_PENDING', 'COMPLETION_VERIFIED', 'CLOSED'].includes(c.status as string) ? 100 : null);
-  return { c, history: [...history], evidence: [...evidence], inspections: [...inspections], assignments: [...assignments], updates: [...updates], completions: [...completions], appeals: [...appeals], progress };
+  return { c, history: [...history], evidence: [...evidence], inspections: [...inspections], assignments: [...assignments], updates: [...updates], completions: [...completions], appeals: [...appeals], feedback: feedback[0] ?? null, progress };
 }
 
 export type ComplaintDetail = NonNullable<Awaited<ReturnType<typeof getComplaintDetail>>>;

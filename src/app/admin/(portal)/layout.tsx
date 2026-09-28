@@ -15,6 +15,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const nav: NavItem[] = [{ href: '/admin', label: t('nav.dashboard'), icon: '📊' }];
   const add = (perm: string | string[], href: string, key: MessageKey, icon: string) => { if (any(perm)) nav.push({ href, label: t(key), icon }); };
   add('complaint.view.all', '/admin/complaints', 'nav.complaints', '📋');
+  add('report.export', '/admin/reports', 'rep.title', '📑');
   add(['user.manage.all', 'user.manage', 'user.view'], '/admin/users', 'nav.users', '👥');
   add(['citizen.view', 'citizen.manage'], '/admin/citizens', 'admin.citizens', '🧑‍🤝‍🧑');
   add(['role.manage', 'role.custom.manage'], '/admin/roles', 'nav.roles', '🔐');

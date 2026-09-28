@@ -6,11 +6,12 @@ import { getT } from '@/i18n/server';
 import { getComplaintDetail } from '@/lib/complaint-detail';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { StatusBadge, PriorityBadge } from '@/components/badges';
-import { Timeline } from '@/components/Timeline';
+import { CitizenTimeline } from '@/components/CitizenTimeline';
 import { BeforeAfter } from '@/components/Evidence';
 import { Section } from '@/components/ui';
 import type { MessageKey } from '@/i18n';
 import { AppealForm } from './AppealForm';
+import { AddInfoForm, FeedbackForm } from './CitizenForms';
 
 export default async function CitizenComplaint({ params }: { params: Promise<{ code: string }> }) {
   const user = await requirePageUser('PUBLIC', 'complaint.view.own');
@@ -62,7 +63,7 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
             </dl>
           </Section>
           <Section title={t('complaint.timeline')} className="md:col-span-2">
-            <Timeline history={d.history.map((h) => ({ to_status: h.to_status as string, created_at: h.created_at as string }))} status={c.status as string} lang={lang} />
+            <CitizenTimeline d={d} lang={lang} />
           </Section>
         </div>
       </div>
@@ -113,6 +114,14 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
         {(c.supporters_count as number) > 0 && <p className="mt-2 text-sm font-semibold text-navy-700">👥 {t('complaint.supporters', { n: c.supporters_count as number })}</p>}
       </div>
 
+      {!finished && c.info_requested_at && (
+        <div className="card border-navy-200 bg-navy-50 p-4">
+          <p className="font-bold text-navy-900">❓ {t('info.requested')}</p>
+          <p className="mt-1 text-sm text-navy-900">{c.info_request_note as string}</p>
+          <p className="mb-3 text-xs text-slate-500">{fmtDateTime(c.info_requested_at as string, lang)}</p>
+          <AddInfoForm code={c.code as string} requested />
+        </div>
+      )}
       {c.status === 'ON_HOLD' && (
         <div className="card border-amber-200 bg-amber-50 p-4 text-amber-900">
           <p className="font-bold">⏸️ {t('status.ON_HOLD')}: {t(`hold.${c.on_hold_reason}` as MessageKey)}</p>
@@ -142,7 +151,7 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
           </dl>
         </Section>
         <Section title={t('complaint.timeline')} className="md:col-span-2">
-          <Timeline history={d.history.map((h) => ({ to_status: h.to_status as string, created_at: h.created_at as string }))} status={c.status as string} lang={lang} rejectionLabel={reasonKey ? t(reasonKey) : undefined} />
+          <CitizenTimeline d={d} lang={lang} />
         </Section>
       </div>
 
@@ -179,6 +188,14 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
               {a.decision_notes && <p className="mt-1">{t('appeal.decision')}: {a.decision_notes as string}</p>}
             </div>
           ))}
+        </Section>
+      )}
+      {!finished && !c.info_requested_at && (
+        <Section title={t('info.addTitle')}><AddInfoForm code={c.code as string} requested={false} /></Section>
+      )}
+      {finished && (
+        <Section title={`⭐ ${t('fb.title')}`}>
+          <FeedbackForm code={c.code as string} current={d.feedback ? { rating: d.feedback.rating as number, comment: (d.feedback.comment as string | null) ?? null } : null} />
         </Section>
       )}
       {canAppeal && <AppealForm code={c.code as string} />}

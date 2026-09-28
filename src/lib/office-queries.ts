@@ -23,11 +23,12 @@ export const BUCKETS: Record<string, string[]> = {
 export interface Filters {
   bucket?: string; ward?: string; street?: string; category?: string; status?: string; priority?: string;
   from?: string; to?: string; staff?: string; q?: string; dept?: string; page?: string; escalated?: string; conflict?: string; lb?: string;
+  district?: string; taluk?: string;
 }
 
 /** Complaints still waiting for someone to be put on the work (before assignment). */
 const UNASSIGNED = sql`c.status IN ('SUBMITTED','AI_CLASSIFIED','REOPENED','INITIAL_REVIEW','SITE_INSPECTION','VERIFIED')
-  AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.purpose = 'WORK' AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS') AND a.assignee_role <> 'SUPERVISOR')`;
+  AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.purpose = 'WORK' AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS') AND a.assignee_role IN ('PRIMARY','SUPPORT'))`;
 
 /**
  * "My action required": complaints where the next step is this user's — work assigned to them, complaints they
@@ -43,7 +44,7 @@ export function myActionSql(u: AuthUser) {
   const perm = byPerm.length && u.scope !== 'ASSIGNED' ? sql`c.status IN ${sql(byPerm)}` : sql`FALSE`;
   return sql`(${perm} OR EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.assigned_to = ${u.id} AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS')
       AND ((a.purpose = 'WORK' AND a.assignee_role IN ('PRIMARY','SUPPORT') AND c.status IN ('ASSIGNED','IN_PROGRESS','ON_HOLD','REWORK_REQUIRED'))
-        OR (a.purpose = 'WORK' AND a.assignee_role = 'SUPERVISOR' AND c.status IN ('WORK_COMPLETED','VERIFICATION_PENDING'))
+        OR (a.purpose = 'WORK' AND a.assignee_role IN ('SUPERVISOR','VERIFIER') AND c.status IN ('WORK_COMPLETED','VERIFICATION_PENDING'))
         OR (a.purpose = 'INSPECTION' AND c.status = 'SITE_INSPECTION'))))`;
 }
 
@@ -67,6 +68,8 @@ export function filterSql(f: Filters, u?: AuthUser) {
   if (f.staff && /^[0-9a-f-]{36}$/i.test(f.staff)) parts.push(sql`(c.assigned_to = ${f.staff} OR EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.assigned_to = ${f.staff})
     OR EXISTS (SELECT 1 FROM complaint_actions ca JOIN complaint_action_assignees x ON x.action_id = ca.id WHERE ca.complaint_id = c.id AND x.user_id = ${f.staff} AND x.removed_at IS NULL))`);
   if (f.lb && Number(f.lb)) parts.push(sql`c.local_body_id = ${Number(f.lb)}`);
+  if (f.district && Number(f.district)) parts.push(sql`c.local_body_id IN (SELECT id FROM local_bodies WHERE district_id = ${Number(f.district)})`);
+  if (f.taluk && Number(f.taluk)) parts.push(sql`c.local_body_id IN (SELECT id FROM local_bodies WHERE taluk_id = ${Number(f.taluk)})`);
   if (f.escalated) parts.push(sql`c.escalated`);
   if (f.conflict) parts.push(sql`c.location_conflict`);
   if (f.from && /^\d{4}-\d{2}-\d{2}$/.test(f.from)) parts.push(sql`c.created_at >= ${f.from}::date`);

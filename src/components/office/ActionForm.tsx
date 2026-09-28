@@ -10,11 +10,12 @@ import { Alert, Spinner } from '@/components/ui';
 export type FieldKind =
   | 'note' | 'notes' | 'photo' | 'photoRequired' | 'gps' | 'gpsRequired' | 'progress' | 'outcome' | 'reason'
   | 'assignee' | 'inspector' | 'dueAt' | 'priority' | 'closeToggle' | 'supporters' | 'noteRequired' | 'user'
-  | 'holdReason' | 'method' | 'submitToggle' | 'supervisor' | 'classify' | 'level';
+  | 'holdReason' | 'method' | 'submitToggle' | 'supervisor' | 'classify' | 'level' | 'dueRequired';
 
 export interface ClassifyOpts {
   categories: { id: number; name: string }[];
-  issueTypes: { id: number; category_id: number; name: string }[];
+  subcategories: { id: number; category_id: number; name: string }[];
+  issueTypes: { id: number; category_id: number; subcategory_id: number | null; name: string }[];
   departments: { id: number; name: string }[];
   canCategory: boolean;
   canDepartment: boolean;
@@ -63,6 +64,7 @@ export function ActionForm({
     setError(null);
     if (needsPhoto && !photos.length) return setError(t('report.photoNeeded'));
     if (has('holdReason') && !v.reason) return setError(t('wf.holdReasonNeeded'));
+    if (has('dueRequired') && !v.dueAt) return setError(t('wf.dueNeeded'));
     if (fieldVerify && (v.notes ?? '').trim().length < 3) return setError(t('wf.fieldNotesNeeded'));
     if (needsGps && !geo) return setError(t('field.needLocation'));
     if (has('noteRequired') && (v.note ?? '').trim().length < 3) return setError(t('err.reasonRequired'));
@@ -113,14 +115,25 @@ export function ActionForm({
           {classify.canCategory && (
             <>
               <label className="block"><span className="label">{t('wf.category')}</span>
-                <select className="input" value={v.categoryId ?? ''} onChange={(e) => setV((s0) => ({ ...s0, categoryId: e.target.value, issueTypeId: '' }))}>
+                <select className="input" value={v.categoryId ?? ''} onChange={(e) => setV((s0) => ({ ...s0, categoryId: e.target.value, subcategoryId: '', issueTypeId: '' }))}>
                   {classify.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </label>
+              {classify.subcategories.some((sc) => String(sc.category_id) === String(v.categoryId)) && (
+                <label className="block"><span className="label">{t('wf.subcategory')}</span>
+                  <select className="input" value={v.subcategoryId ?? ''} onChange={(e) => setV((s0) => ({ ...s0, subcategoryId: e.target.value, issueTypeId: '' }))}>
+                    <option value="">—</option>
+                    {classify.subcategories.filter((sc) => String(sc.category_id) === String(v.categoryId)).map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+                  </select>
+                </label>
+              )}
               <label className="block"><span className="label">{t('wf.issueType')}</span>
-                <select className="input" value={v.issueTypeId ?? ''} onChange={(e) => set('issueTypeId', e.target.value)}>
+                <select className="input" value={v.issueTypeId ?? ''} onChange={(e) => {
+                  const it = classify.issueTypes.find((x) => String(x.id) === e.target.value);
+                  setV((s0) => ({ ...s0, issueTypeId: e.target.value, ...(it?.subcategory_id ? { subcategoryId: String(it.subcategory_id) } : {}) }));
+                }}>
                   <option value="">—</option>
-                  {classify.issueTypes.filter((it) => String(it.category_id) === String(v.categoryId)).map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
+                  {classify.issueTypes.filter((it) => String(it.category_id) === String(v.categoryId) && (!v.subcategoryId || String(it.subcategory_id) === String(v.subcategoryId))).map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
                 </select>
               </label>
             </>
@@ -231,8 +244,8 @@ export function ActionForm({
           </select>
         </label>
       )}
-      {has('dueAt') && (
-        <label className="block"><span className="label">{t('office.dueDate')}</span>
+      {(has('dueAt') || has('dueRequired')) && (
+        <label className="block"><span className="label">{t('office.dueDate')}{has('dueRequired') ? ' *' : ''}</span>
           <input type="date" className="input" min={new Date().toISOString().slice(0, 10)} value={v.dueAt ?? ''} onChange={(e) => set('dueAt', e.target.value)} />
         </label>
       )}

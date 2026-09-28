@@ -15,8 +15,8 @@ export function WorkflowSections({ d, lang }: { d: ComplaintDetail; lang: Lang }
   );
   const work = d.assignments.filter((a) => a.purpose === 'WORK');
   const activeTeam = work.filter((a) => ACTIVE.includes(a.status as string));
-  const roleOrder: Record<string, number> = { SUPERVISOR: 0, PRIMARY: 1, SUPPORT: 2 };
-  const roleIcon: Record<string, string> = { SUPERVISOR: '🧑‍💼', PRIMARY: '👷', SUPPORT: '🤝' };
+  const roleOrder: Record<string, number> = { SUPERVISOR: 0, VERIFIER: 1, PRIMARY: 2, SUPPORT: 3 };
+  const roleIcon: Record<string, string> = { SUPERVISOR: '🧑‍💼', VERIFIER: '🔎', PRIMARY: '👷', SUPPORT: '🤝' };
   const deptOverridden = c.suggested_department_id && c.department_id && c.suggested_department_id !== c.department_id;
   const finished = ['CLOSED', 'REJECTED', 'DUPLICATE'].includes(c.status as string);
   return (
@@ -24,6 +24,7 @@ export function WorkflowSections({ d, lang }: { d: ComplaintDetail; lang: Lang }
       <Section title={`🏷️ ${t('wf.classification')}`}>
         <dl className="text-sm">
           <Row k={t('wf.category')} v={`${c.icon ?? ''} ${L(c.category_en, c.category_ta)}`} />
+          <Row k={t('wf.subcategory')} v={L(c.sub_en, c.sub_ta)} />
           <Row k={t('wf.issueType')} v={L(c.issue_en, c.issue_ta)} />
           <Row k={t('wf.suggestedDept')} v={L(c.sdept_en, c.sdept_ta)} />
           <Row k={t('wf.assignedDept')} v={<>{L(c.dept_en, c.dept_ta)}{deptOverridden ? <span className="ml-1 badge bg-amber-100 text-amber-800">{t('wf.changedByOfficer')}</span> : null}</>} />
@@ -59,6 +60,12 @@ export function WorkflowSections({ d, lang }: { d: ComplaintDetail; lang: Lang }
             <p className="font-bold">{t('wf.resolution')}: {c.resolution_type ? t(`res.${c.resolution_type}` as MessageKey) : '—'}</p>
             {c.resolution_notes && <p>{c.resolution_notes as string}</p>}
             <p className="text-xs text-slate-500">{(c.resolved_by_name as string) ?? t('wf.system')}{c.resolved_at ? ` · ${fmtDateTime(c.resolved_at as string, lang)}` : ''}</p>
+          </div>
+        )}
+        {d.feedback && (
+          <div className="mb-3 rounded-lg bg-amber-50 p-2.5 text-sm text-amber-900">
+            <p className="font-bold">{t('fb.citizenRating')}: {'★'.repeat(d.feedback.rating as number)}{'☆'.repeat(5 - (d.feedback.rating as number))} ({d.feedback.rating as number}/5)</p>
+            {d.feedback.comment && <p>“{d.feedback.comment as string}”</p>}
           </div>
         )}
         {d.completions.length === 0 ? <p className="text-sm text-slate-500">{t('wf.noCompletion')}</p> : (
