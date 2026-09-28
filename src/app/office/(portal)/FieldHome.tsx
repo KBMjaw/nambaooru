@@ -75,7 +75,7 @@ export async function FieldHome() {
               {w.status === 'IN_PROGRESS' && (
                 <>
                   <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gps', 'submitToggle']} hint={t('wf.completeHint')} block /></div>
-                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['progress', 'notes', 'photo', 'gps']} block /></div>
+                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['workDone', 'notes', 'visibility', 'progress', 'photo', 'gps']} defaults={{ visibility: 'PUBLIC' }} block /></div>
                 </>
               )}
               {['ASSIGNED', 'IN_PROGRESS'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} block /></div>}

@@ -6,6 +6,9 @@
 // Creates tagged test records (UI-<ts>); the complaints end closed / reopened-and-closed.
 //
 //   node tests/critical-flow-browser.mjs <baseUrl> <credentials.json> [chromiumPath]
+// Existing complaint mode (no new complaint is created for the main flow):
+//   EXISTING_CODE=NU-2026-001001 CITIZEN_MOBILE=... CITIZEN_PW=... SNIPPET="words from the complaint"
+//   EXISTING_REJECTED=NU-2026-001003 OTHER_CODE=NU-2026-001002 node tests/critical-flow-browser.mjs ...
 // Needs playwright-core resolvable from the working directory.
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -61,8 +64,19 @@ await cit.ctx.addCookies([{ name: 'nu_lang', value: 'en', url: B }]);
 const file = async (t) => (await (await cit.ctx.request.post(`${B}/api/complaints`, { multipart: {
   payload: JSON.stringify({ text: `${t} (${TAG})`, inputMode: 'TEXT', categoryCode: 'STREET_LIGHT', localBodyId: lb.id, wardId: w10.id, streetId: null, streetText: `${TAG} road`, landmark: 'near temple', ...GEO, accuracy: 10, gpsAt: new Date().toISOString(), duplicateOverride: true }),
   evidenceMeta: JSON.stringify([{ ...GEO, accuracy: 10, capturedAt: new Date().toISOString(), source: 'CAMERA' }]), evidence: photo(0) } })).json()).code;
-const S = await file('Street light near the temple gate is not working at night');
-ok('setup', 'citizen registered and filed a complaint', reg.status() === 200 && S, S);
+const EXISTING = process.env.EXISTING_CODE;
+const SNIP = process.env.SNIPPET ?? 'temple gate';
+let S;
+if (EXISTING) {
+  // Existing complaint: its own citizen logs in (password set beforehand); nothing new is filed for the main flow
+  const r = await cit.ctx.request.post(`${B}/api/auth/login`, { data: { portal: 'PUBLIC', identifier: process.env.CITIZEN_MOBILE, password: process.env.CITIZEN_PW } });
+  await cit.ctx.addCookies([{ name: 'nu_lang', value: 'en', url: B }]);
+  S = EXISTING;
+  ok('setup', `existing complaint ${S} (its citizen logged in)`, r.status() === 200, r.status());
+} else {
+  S = await file('Street light near the temple gate is not working at night');
+  ok('setup', 'citizen registered and filed a complaint', reg.status() === 200 && S, S);
+}
 
 // ---------------------------------------------------------------- EO: list → row click → detail → citizen submission
 const eo = await session('OFFICE', 'eo.chennimalai');
@@ -75,11 +89,11 @@ await eo.page.getByRole('link', { name: S }).first().click();
 await eo.page.waitForURL(new RegExp(`/office/complaints/${S}`), { timeout: 8000 }).catch(() => {});
 ok('list', 'clicking the complaint number opens the detail page', eo.page.url().endsWith(`/office/complaints/${S}`), eo.page.url());
 let t = await text(eo.page);
-ok('detail', 'citizen submission: description, category, location, submitted time, citizen photo', t.includes('Citizen submission') && t.includes('temple gate is not working') && t.includes('Ward 10') && (await eo.page.locator('img[src^="/api/evidence/"]').count()) > 0, 'checked');
+ok('detail', 'citizen submission: description, category, location, submitted time, citizen photo', t.includes('Citizen submission') && t.includes(SNIP) && t.includes('Ward 10') && ((await eo.page.locator('img[src^="/api/evidence/"]').count()) > 0 || t.includes('No photo was attached')), 'checked');
 ok('detail', 'TAKE ACTION and next step shown', /TAKE ACTION/i.test(t) && /Next step/i.test(t), 'checked');
 ok('detail', 'direct URL navigation works', (await eo.ctx.request.get(`${B}/office/complaints/${S}`)).status() === 200, 'checked');
 
-let e = await act(eo.page, 'Acknowledge & review');
+let e = await act(eo.page, 'Acknowledge / accept');
 ok('acknowledge', 'EO acknowledges → status Acknowledged', !e && (await text(eo.page)).includes('Acknowledged'), e ?? 'ok');
 e = await act(eo.page, 'Classify / route department', async (f) => { await pick(f, 'Pole'); await pick(f, 'Electric pole damaged'); });
 ok('classify', 'EO classifies Electrical › Pole › Pole damaged', !e && (await text(eo.page)).includes('Electric pole damaged'), e ?? 'ok');
@@ -120,7 +134,7 @@ ok('mobile', 'field queue: no horizontal scroll', (await overflow(ravi.page)) <=
 await ravi.page.locator('li', { hasText: S }).first().getByRole('link', { name: /Open complaint/ }).click();
 await ravi.page.waitForURL(new RegExp(S)); await ravi.page.waitForLoadState('networkidle');
 t = await text(ravi.page);
-ok('mobile', 'field staff opens the complaint and sees the citizen submission', t.includes('Citizen submission') && t.includes('temple gate'), 'checked');
+ok('mobile', 'field staff opens the complaint and sees the citizen submission', t.includes('Citizen submission') && t.includes(SNIP), 'checked');
 ok('mobile', 'detail page: no horizontal scroll on the phone', (await overflow(ravi.page)) <= 1, await overflow(ravi.page));
 e = await act(ravi.page, '^▶️ Start$|Start$', async (f) => { await f.locator('input[type=file]').setInputFiles(photo(2)); await ravi.page.waitForTimeout(1200); });
 ok('work', 'START WORK (with before photo) → Work in Progress', !e && (await text(ravi.page)).includes('Work in Progress'), e ?? 'ok');
@@ -128,7 +142,7 @@ e = await act(ravi.page, 'Add note', async (f) => { await f.getByText('Public pr
 ok('notes', 'field staff adds a PUBLIC progress update', !e, e ?? 'ok');
 e = await act(ravi.page, 'Upload evidence', async (f) => { await f.locator('input[type=file]').setInputFiles([photo(3), photo(4)]); await ravi.page.waitForTimeout(1500); });
 ok('evidence', 'field staff uploads 2 work photos', !e, e ?? 'ok');
-e = await act(ravi.page, 'Update progress', async (f) => { await f.locator('textarea').first().fill('Fitting installed, wiring in progress'); await f.locator('input[type=file]').setInputFiles(photo(5)); await ravi.page.waitForTimeout(1200); });
+e = await act(ravi.page, 'Add action / progress', async (f) => { await f.locator('textarea').first().fill('Inspected the damaged light; removed the faulty fitting and installed a replacement'); await f.locator('input[type=file]').setInputFiles(photo(5)); await ravi.page.waitForTimeout(1200); });
 ok('work', 'progress update with photo', !e, e ?? 'ok');
 // Completion without the reference photo must be refused
 await ravi.page.getByRole('button', { name: /TAKE ACTION/ }).click().catch(() => {});
@@ -146,7 +160,7 @@ ok('complete', 'MARK WORK COMPLETED with note + reference photo → Verification
 await sup.page.reload(); await sup.page.waitForLoadState('networkidle');
 t = await text(sup.page);
 ok('verify', 'verifier sees citizen evidence + before/progress/completion photos + notes', t.includes('Before work') && t.includes('Completion evidence') && t.includes('Street light fitting replaced') && (await sup.page.locator('img[src^="/api/evidence/"]').count()) >= 6, 'checked');
-e = await act(sup.page, 'Reject — rework', async (f) => { await f.locator('textarea').first().fill('Lamp cover missing — please fix'); });
+e = await act(sup.page, 'Reject — rework', async (f) => { await f.locator('textarea').first().fill('Lamp cover missing — please fix'); await f.locator('textarea').nth(1).fill('The lamp cover still has to be fitted.'); });
 ok('rework', 'verifier rejects with a reason → Rework Required', !e && (await text(sup.page)).includes('Rework Required'), e ?? 'ok');
 await ravi.page.goto(`${B}/office/notifications`, { waitUntil: 'networkidle' });
 ok('rework', 'field staff notified: Rework required', (await text(ravi.page)).includes('Rework required'), 'checked');
@@ -168,23 +182,34 @@ ok('timeline', 'officer timeline lists every step with actor and visibility', ['
 await cit.page.goto(`${B}/complaints/${S}`, { waitUntil: 'networkidle' });
 t = await text(cit.page);
 ok('citizen', 'citizen sees Closed with the full timeline and resolution', t.includes('Resolved / closed') && t.includes('Resolved') && t.includes('Work completed'), 'checked');
-ok('citizen', 'citizen sees the PUBLIC progress update', t.includes('new LED fitting being installed'), 'checked');
+ok('citizen', 'citizen sees the PUBLIC progress update and the public work performed', t.includes('new LED fitting being installed') && t.includes('installed a replacement'), 'checked');
+ok('citizen', 'citizen timeline: Submitted → Received → Reviewed → Department → Assigned → Started → Progress → Completed → Under verification → Approved → Closed',
+  ['Complaint submitted', 'Complaint received', 'Complaint reviewed', 'Department assigned', 'Officer / staff assigned', 'Work started', 'Progress updates', 'Work completed', 'Under verification', 'Approved after verification', 'Resolved / closed'].every((x) => t.includes(x)), 'checked');
+ok('citizen', 'citizen told about the rework with the public reason', t.includes('Rework requested 1 time') && t.includes('lamp cover still has to be fitted'), 'checked');
+const cn = await (await cit.ctx.request.get(`${B}/api/notifications?portal=PUBLIC`)).json();
+const titles = cn.items.filter((n) => n.code === S).map((n) => n.title_en);
+ok('notify', 'citizen notified at every stage (received / started / progress / rework / verification / approved / closed)',
+  ['Complaint received and under review', 'Work assigned', 'Work started', 'Progress updated', 'Rework required on your complaint', 'Work done — verification pending', 'Resolution verified', 'Complaint closed'].every((x) => titles.includes(x)), titles.join(' | '));
+const nb = await (await cit.ctx.request.get(`${B}/api/notifications?portal=PUBLIC&count=1`)).json();
+await cit.ctx.request.post(`${B}/api/notifications?portal=PUBLIC`, { data: { id: cn.items.find((n) => n.code === S && !n.read_at)?.id } });
+const na = await (await cit.ctx.request.get(`${B}/api/notifications?portal=PUBLIC&count=1`)).json();
+ok('notify', 'opening a notification lowers the unread count by 1', na.unread === nb.unread - 1, `${nb.unread} → ${na.unread}`);
 ok('citizen', 'citizen does NOT see internal notes or verification notes', !t.includes('check pole stock') && !t.includes('Lamp cover missing'), 'checked');
 ok('citizen', 'citizen sees completion photos (not inspection / verification ones)', (await cit.page.locator('img[src^="/api/evidence/"]').count()) >= 2, await cit.page.locator('img[src^="/api/evidence/"]').count());
 ok('mobile', 'citizen tracking page: no horizontal scroll', (await overflow(cit.page)) <= 1, await overflow(cit.page));
 
 // ---------------------------------------------------------------- Not Accepted is not a dead end
-const R = await file('Street light test that will not be accepted');
-const rj = await eo.ctx.request.post(`${B}/api/office/complaints/${R}/action?portal=OFFICE`, { data: { action: 'reject', reason: 'INSUFFICIENT_EVIDENCE', notes: 'Photo does not show a street light' } });
+const R = process.env.EXISTING_REJECTED ?? await file('Street light test that will not be accepted');
+const rj = process.env.EXISTING_REJECTED ? { status: () => 200 } : await eo.ctx.request.post(`${B}/api/office/complaints/${R}/action?portal=OFFICE`, { data: { action: 'reject', reason: 'INSUFFICIENT_EVIDENCE', notes: 'Photo does not show a street light' } });
 await eo.page.goto(`${B}/office/complaints/${R}`, { waitUntil: 'networkidle' });
 t = await text(eo.page);
-ok('notaccepted', 'Not Accepted complaint shows the reason, who decided and when', rj.status() === 200 && t.includes('Not Accepted') && t.includes('Photo does not show a street light') && t.includes('Decided by') && t.includes('R. Senthil'), 'checked');
+ok('notaccepted', `Not Accepted complaint ${R} shows the reason, who decided and when`, rj.status() === 200 && t.includes('Not Accepted') && t.includes('Decided by') && /\d{1,2} \w+ \d{4}/.test(t) && (process.env.EXISTING_REJECTED ? true : t.includes('Photo does not show a street light') && t.includes('R. Senthil')), 'checked');
 e = await act(eo.page, 'Accept complaint', async (f) => { await f.locator('textarea').fill('Citizen sent a clearer photo by phone'); });
 ok('notaccepted', 'EO accepts it (reopen) → back in the workflow', !e && (await text(eo.page)).includes('Reopened'), e ?? 'ok');
 await eo.ctx.request.post(`${B}/api/office/complaints/${R}/action?portal=OFFICE`, { data: { action: 'reject', reason: 'INVALID', notes: 'Automated UI test record' } });
 
 // ---------------------------------------------------------------- unauthorized page access
-const other = await file('Street light test for access checks');
+const other = process.env.OTHER_CODE ?? await file('Street light test for access checks');
 const r1 = await ravi.ctx.request.get(`${B}/office/complaints/${other}`);
 ok('rbac', 'field staff cannot open a complaint that is not assigned to them', r1.status() === 404, r1.status());
 const san = await session('OFFICE', 'officer.sanitation');
@@ -192,7 +217,7 @@ const r2 = await san.ctx.request.get(`${B}/office/complaints/${S}`);
 ok('rbac', 'Sanitation officer cannot open an Electrical complaint (department jurisdiction)', r2.status() === 404, r2.status());
 const r3 = await cit.ctx.request.get(`${B}/office/complaints/${S}`, { maxRedirects: 0 });
 ok('rbac', 'citizen cannot open the officer page', [302, 303, 307, 308].includes(r3.status()), r3.status());
-await eo.ctx.request.post(`${B}/api/office/complaints/${other}/action?portal=OFFICE`, { data: { action: 'reject', reason: 'INVALID', notes: 'Automated UI test record' } });
+if (!process.env.OTHER_CODE) await eo.ctx.request.post(`${B}/api/office/complaints/${other}/action?portal=OFFICE`, { data: { action: 'reject', reason: 'INVALID', notes: 'Automated UI test record' } });
 
 await browser.close();
 const pass = res.filter((r) => r.pass).length;

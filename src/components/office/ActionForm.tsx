@@ -10,7 +10,7 @@ import { Alert, Spinner } from '@/components/ui';
 export type FieldKind =
   | 'note' | 'notes' | 'photo' | 'photoRequired' | 'gps' | 'gpsRequired' | 'progress' | 'outcome' | 'reason'
   | 'assignee' | 'inspector' | 'dueAt' | 'priority' | 'closeToggle' | 'supporters' | 'noteRequired' | 'user'
-  | 'holdReason' | 'method' | 'submitToggle' | 'supervisor' | 'classify' | 'level' | 'dueRequired' | 'visibility' | 'evidenceKind' | 'notesRequired';
+  | 'holdReason' | 'method' | 'submitToggle' | 'supervisor' | 'classify' | 'level' | 'dueRequired' | 'visibility' | 'evidenceKind' | 'notesRequired' | 'workDone' | 'publicReason';
 
 export interface ClassifyOpts {
   categories: { id: number; name: string }[];
@@ -66,6 +66,7 @@ export function ActionForm({
     if (has('holdReason') && !v.reason) return setError(t('wf.holdReasonNeeded'));
     if (has('dueRequired') && !v.dueAt) return setError(t('wf.dueNeeded'));
     if (has('notesRequired') && (v.notes ?? '').trim().length < 5) return setError(t('wf.notesNeeded'));
+    if (has('workDone') && (v.workDone ?? '').trim().length < 2) return setError(t('wf.workDoneNeeded'));
     if (fieldVerify && (v.notes ?? '').trim().length < 3) return setError(t('wf.fieldNotesNeeded'));
     if (needsGps && !geo) return setError(t('field.needLocation'));
     if (has('noteRequired') && (v.note ?? '').trim().length < 3) return setError(t('err.reasonRequired'));
@@ -273,9 +274,19 @@ export function ActionForm({
           <input type="range" min={0} max={100} step={10} className="w-full" value={v.progress} onChange={(e) => set('progress', e.target.value)} />
         </label>
       )}
+      {has('workDone') && (
+        <label className="block"><span className="label">{t('wf.workDone')} *</span>
+          <textarea className="input min-h-20" value={v.workDone ?? ''} onChange={(e) => set('workDone', e.target.value)} maxLength={2000} placeholder={t('wf.workDonePh')} />
+        </label>
+      )}
       {(has('notes') || has('notesRequired')) && (
         <label className="block"><span className="label">{has('notesRequired') ? `${t('wf.completionNote')} *` : t('complaint.notes')}</span>
           <textarea className="input min-h-20" value={v.notes ?? ''} onChange={(e) => set('notes', e.target.value)} maxLength={2000} />
+        </label>
+      )}
+      {has('publicReason') && (
+        <label className="block"><span className="label">{t('wf.publicReason')} ({t('common.optional')})</span>
+          <textarea className="input min-h-16" value={v.publicReason ?? ''} onChange={(e) => set('publicReason', e.target.value)} maxLength={500} placeholder={t('wf.publicReasonPh')} />
         </label>
       )}
       {(has('note') || has('noteRequired')) && (

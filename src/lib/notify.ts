@@ -15,10 +15,12 @@ function render(tpl: string, vars: Vars) {
 export async function notify(userId: string, templateCode: string, vars: Vars, complaintId?: number | bigint | string | null) {
   const [t] = await sql`SELECT * FROM notification_templates WHERE code = ${templateCode} AND active`;
   if (!t) return;
-  const title_en = render(t.title_en as string, { ...vars, category: vars.category_en ?? vars.category });
-  const title_ta = render(t.title_ta as string, { ...vars, category: vars.category_ta ?? vars.category });
-  const body_en = render(t.body_en as string, { ...vars, category: vars.category_en ?? vars.category, reason: vars.reason_en ?? vars.reason });
-  const body_ta = render(t.body_ta as string, { ...vars, category: vars.category_ta ?? vars.category, reason: vars.reason_ta ?? vars.reason });
+  const en = { ...vars, category: vars.category_en ?? vars.category, department: vars.department_en ?? vars.department, reason: vars.reason_en ?? vars.reason };
+  const ta = { ...vars, category: vars.category_ta ?? vars.category, department: vars.department_ta || vars.department, reason: vars.reason_ta ?? vars.reason };
+  const title_en = render(t.title_en as string, en);
+  const title_ta = render(t.title_ta as string, ta);
+  const body_en = render(t.body_en as string, en);
+  const body_ta = render(t.body_ta as string, ta);
   const channels = (t.channels as string[]) ?? ['IN_APP'];
   for (const ch of channels) {
     await sql`

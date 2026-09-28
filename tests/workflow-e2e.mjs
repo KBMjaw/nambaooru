@@ -147,7 +147,7 @@ ok('notify', 'EO notified: Citizen added information', await hasNotif(eo, 'OFFIC
 ok('info', 'reply visible in the complaint history', await shows(eo, `/office/complaints/${S}`, 'pole number 12'), 'checked');
 expect('classify', 'classify with no change is rejected', await act(eo, S, { action: 'classify', issueTypeId: poleType?.id }), 400);
 await toVerified(S);
-ok('notify', 'citizen notified: Complaint under review', await hasNotif(A, 'PUBLIC', S, 'Complaint under review'), 'checked');
+ok('notify', 'citizen notified: Complaint received and under review (names the department)', (await notifs(A, 'PUBLIC')).some((n) => n.code === S && n.title_en === 'Complaint received and under review' && n.body_en.includes('Electrical')), 'checked');
 ok('notify', 'citizen notified: Issue verified', await hasNotif(A, 'PUBLIC', S, 'Issue verified'), 'checked');
 
 expect('assign', 'ward member cannot assign', await act(ward, S, { action: 'assign', assigneeId: RAVI }), 403);

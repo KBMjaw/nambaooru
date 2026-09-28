@@ -25,7 +25,7 @@ export const HOLD_LABEL: Record<string, { en: string; ta: string }> = {
 };
 const ACTIVE_A = ['PENDING', 'ACCEPTED', 'IN_PROGRESS'];
 /** Statuses in which a complaint may be finished with a resolution type (reject / duplicate). */
-const RESOLVABLE = ['AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
+const RESOLVABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
 const FINAL_S = ['CLOSED', 'REJECTED', 'DUPLICATE'];
 
 type Ctx = { params: Promise<{ code: string }> };
@@ -81,13 +81,15 @@ export const POST = route<Ctx>(async (req, { params }) => {
     case 'review': {
       need('complaint.review');
       requireStatus('AI_CLASSIFIED', 'REOPENED', 'SUBMITTED');
-      await transition(id, 'INITIAL_REVIEW', u, { note: str(data.note), publicNote: false });
+      const [dep] = c.department_id ? await sql`SELECT name_en, name_ta FROM departments WHERE id = ${c.department_id}` : [];
+      await transition(id, 'INITIAL_REVIEW', u, { note: str(data.note), publicNote: false,
+        notifyVars: { department: (dep?.name_en as string) ?? '', department_en: (dep?.name_en as string) ?? '', department_ta: (dep?.name_ta as string) ?? '' } });
       break;
     }
 
     case 'schedule_inspection': {
       need('complaint.schedule_inspection');
-      requireStatus('AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION');
+      requireStatus('SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION');
       const inspectorId = z.string().uuid().parse(data.inspectorId);
       const inspector = await assignableUser(u, inspectorId, true, c.local_body_id as number);
       const due = data.dueAt ? new Date(String(data.dueAt)) : null;
@@ -356,14 +358,18 @@ export const POST = route<Ctx>(async (req, { params }) => {
         await transition(id, 'IN_PROGRESS', u, { note: str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : 'Work started'), publicNote: !str(data.note) && status !== 'REWORK_REQUIRED', auditAction: 'WORK_STARTED' });
       } else if (action === 'progress') {
         requireStatus('IN_PROGRESS');
-        const notes = z.string().trim().min(2).max(2000).parse(data.notes);
+        // "Add action / progress": what was done (required), extra notes, photos, GPS; public or internal
+        const workDone = z.string().trim().min(2, 'Describe the work performed').max(2000).parse(data.workDone ?? data.notes);
+        const extra = data.workDone != null ? str(data.notes) : null;
+        const visibility = z.enum(['INTERNAL', 'PUBLIC']).parse(data.visibility ?? 'PUBLIC');
+        const notes = extra ? `${workDone}\nNotes: ${extra}` : workDone;
         const pct = z.coerce.number().int().min(0).max(100).parse(data.progress ?? 50);
         const ids = await storeAll('PROGRESS');
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, progress_pct, evidence_id, latitude, longitude)
                   VALUES (${id}, ${a.id}, ${u.id}, 'PROGRESS', ${notes}, ${pct}, ${ids[0] ?? null}, ${geo.latitude}, ${geo.longitude})`;
-        await addHistoryNote(id, 'IN_PROGRESS', u, `Progress ${pct}%: ${notes}`, true);
+        await addHistoryNote(id, 'IN_PROGRESS', u, `Progress ${pct}%: ${notes}`, visibility === 'PUBLIC');
         await notify(c.citizen_id as string, 'PROGRESS', { code }, id);
-        await audit(u, { action: 'PROGRESS_UPDATED', entityType: 'complaint', entityId: code, newValue: { pct, notes, evidenceIds: ids } });
+        await audit(u, { action: 'PROGRESS_UPDATED', entityType: 'complaint', entityId: code, newValue: { pct, workDone, notes: extra, visibility, evidenceIds: ids } });
       } else if (action === 'note') {
         requireStatus('ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED');
         const notes = z.string().trim().min(2).max(2000).parse(data.notes);
@@ -500,6 +506,9 @@ export const POST = route<Ctx>(async (req, { params }) => {
                                AND assignee_role = 'SUPPORT' AND completed_at >= (SELECT completed_at FROM completion_evidence WHERE id = ${ce.id}) - interval '1 minute' RETURNING assigned_to`;
         if (wa) await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes) VALUES (${id}, ${wa.id}, ${u.id}, 'SENT_BACK', ${notes})`;
         await transition(id, 'REWORK_REQUIRED', u, { note: `Rework required (${how}): ${notes}`, publicNote: false, skipCitizenNotify: true });
+        const publicReason = str(data.publicReason) ?? 'The completed work did not pass verification and is being redone.';
+        await addHistoryNote(id, 'REWORK_REQUIRED', u, `Rework required: ${publicReason}`, true);
+        await notify(c.citizen_id as string, 'REWORK_CITIZEN', { code, reason: publicReason }, id);
         for (const x of [wa, ...back].filter(Boolean)) await notify(x.assigned_to as string, 'REWORK_REQUIRED', { code, reason: notes }, id);
       }
       break;

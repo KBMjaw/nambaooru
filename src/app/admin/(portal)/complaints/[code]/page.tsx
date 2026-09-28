@@ -13,6 +13,7 @@ import { Timeline } from '@/components/Timeline';
 import { TakeAction } from '@/components/office/TakeAction';
 import { complaintActions } from '@/components/office/complaintActions';
 import { WorkflowSections } from '@/components/office/WorkflowSections';
+import { CitizenSubmission } from '@/components/office/CitizenSubmission';
 import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
 
 /**
@@ -47,6 +48,7 @@ export default async function AdminComplaint({ params }: { params: Promise<{ cod
         <p className="mt-1 text-sm">👤 <Link className="font-semibold text-navy-700 underline" href={`/admin/citizens/${c.citizen_id}`}>{c.citizen_name as string}</Link>{c.assigned_name ? <> · 👷 {c.assigned_name as string}</> : null}</p>
       </div>
       <TakeAction nextStep={nextStep} count={actions.length}>{actions}</TakeAction>
+      <CitizenSubmission d={d} lang={lang} showContact={has(u, 'citizen.pii.view')} />
       <p className="-mt-2 text-[11px] text-slate-400">{t('admin.adminComplaintNote')}</p>
       <WorkflowSections d={d} lang={lang} />
       <div className="grid gap-4 lg:grid-cols-3">

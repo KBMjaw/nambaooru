@@ -122,6 +122,12 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
           <AddInfoForm code={c.code as string} requested />
         </div>
       )}
+      {c.status === 'REWORK_REQUIRED' && (
+        <div className="card border-rose-200 bg-rose-50 p-4 text-rose-900">
+          <p className="font-bold">↻ {t('status.REWORK_REQUIRED')}</p>
+          <p className="text-sm">{String([...d.history].reverse().find((h) => h.public_note && h.to_status === 'REWORK_REQUIRED' && String(h.note ?? '').startsWith('Rework required:'))?.note ?? '').replace(/^Rework required:\s*/, '') || t('ct.reworkGeneric')}</p>
+        </div>
+      )}
       {c.status === 'ON_HOLD' && (
         <div className="card border-amber-200 bg-amber-50 p-4 text-amber-900">
           <p className="font-bold">⏸️ {t('status.ON_HOLD')}: {t(`hold.${c.on_hold_reason}` as MessageKey)}</p>

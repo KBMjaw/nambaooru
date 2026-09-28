@@ -18,6 +18,7 @@ import { TakeAction } from '@/components/office/TakeAction';
 import { complaintActions } from '@/components/office/complaintActions';
 import { WorkflowSections } from '@/components/office/WorkflowSections';
 import { OfficeTimeline } from '@/components/office/OfficeTimeline';
+import { CitizenSubmission } from '@/components/office/CitizenSubmission';
 import { ComplaintMiniMap } from '@/components/office/ComplaintMiniMap';
 import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
 import type { MessageKey } from '@/i18n';
@@ -119,19 +120,7 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          <Section title={`🧑 ${t('wf.citizenSubmission')}`}>
-            <p className="whitespace-pre-line text-slate-800">“{c.original_text as string}”</p>
-            <p className="mt-1 text-xs text-slate-400">{c.input_mode === 'VOICE' ? '🎙️ Voice' : '⌨️ Text'} · {c.detected_language as string} · {fmtDateTime(c.submitted_at as string, lang)}</p>
-            {ai.translation_en && <p className="mt-2 text-sm text-slate-600">EN: {ai.translation_en}</p>}
-            <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
-              <div><dt className="inline text-slate-500">{t('wf.category')}: </dt><dd className="inline font-semibold">{c.icon as string} {[L(c.category_en, c.category_ta), L(c.sub_en, c.sub_ta), L(c.issue_en, c.issue_ta)].filter(Boolean).join(' › ')}</dd></div>
-              <div><dt className="inline text-slate-500">{t('complaint.location')}: </dt><dd className="inline font-semibold">{location || '—'}{c.landmark ? ` · ${c.landmark}` : ''}</dd></div>
-              <div><dt className="inline text-slate-500">{t('office.citizenContact')}: </dt><dd className="inline font-semibold">{c.citizen_name as string} · 📞 {has(u, 'citizen.pii.view') ? <a className="underline" href={`tel:+91${c.citizen_mobile}`}>{c.citizen_mobile as string}</a> : maskMobile(c.citizen_mobile as string)}</dd></div>
-              <div><dt className="inline text-slate-500">{t('complaint.submitted')}: </dt><dd className="inline font-semibold">{fmtDateTime(c.submitted_at as string, lang)}</dd></div>
-            </dl>
-            <p className="mb-2 mt-3 text-sm font-bold text-slate-600">{t('evk.CITIZEN')} ({citizenEvidence.length})</p>
-            {citizenEvidence.length ? <EvidenceGrid evidence={citizenEvidence as never} lang={lang} /> : <p className="text-sm text-slate-500">—</p>}
-          </Section>
+          <CitizenSubmission d={d} lang={lang} showContact={has(u, 'citizen.pii.view')} />
 
           <Section title={`🛠️ ${t('wf.workEvidence')}`}>
             <BeforeAfter evidence={d.evidence as never} lang={lang} />

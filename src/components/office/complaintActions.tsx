@@ -7,7 +7,7 @@ import type { TFn, MessageKey } from '@/i18n';
 import { ActionForm, type UserOpt, type ClassifyOpts } from './ActionForm';
 
 const WORK = ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'];
-const RESOLVABLE = ['AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
+const RESOLVABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
 const FINAL = ['CLOSED', 'REJECTED', 'DUPLICATE'];
 const ACTIVE = ['PENDING', 'ACCEPTED', 'IN_PROGRESS'];
 
@@ -63,7 +63,7 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     }
     if (status === 'IN_PROGRESS') {
       nodes.push(<ActionForm key={k('cp')} {...P} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gps', 'submitToggle']} hint={t('wf.completeHint')} />);
-      nodes.push(<ActionForm key={k('pr')} {...P} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['progress', 'notes', 'photo', 'gps']} />);
+      nodes.push(<ActionForm key={k('pr')} {...P} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['workDone', 'notes', 'visibility', 'progress', 'photo', 'gps']} defaults={{ visibility: 'PUBLIC' }} />);
     }
     if (['ASSIGNED', 'IN_PROGRESS'].includes(status))
       nodes.push(<ActionForm key={k('ni')} {...P} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} />);
@@ -90,7 +90,7 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     nodes.push(<ActionForm key={k('ri')} {...P} action="request_info" label={t('wf.requestInfo')} icon="❓" tone="btn-outline" fields={['noteRequired']} hint={t('wf.requestInfoHint')} />);
   if (['INITIAL_REVIEW'].includes(status) && has(u, 'complaint.review') && !c.inspection_required)
     nodes.push(<ActionForm key={k('vd')} {...P} action="verify_direct" label={t('office.verifyWithoutInspection')} icon="✔️" tone="btn-primary" fields={['note']} />);
-  if (['AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION'].includes(status) && has(u, 'complaint.schedule_inspection'))
+  if (['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION'].includes(status) && has(u, 'complaint.schedule_inspection'))
     nodes.push(<ActionForm key={k('insp')} {...P} action="schedule_inspection" label={status === 'SITE_INSPECTION' ? `${t('office.reassign')} — ${t('office.inspector')}` : t('office.sendInspection')} icon="🔍" tone={status === 'INITIAL_REVIEW' && c.inspection_required ? 'btn-primary' : 'btn-outline'} fields={['inspector', 'dueAt', 'note']} users={inspectors} />);
   if (status === 'SITE_INSPECTION' && has(u, 'complaint.inspect') && (u.scope !== 'ASSIGNED' || c.inspector_id === u.id))
     nodes.push(<ActionForm key={k('rec')} {...P} action="inspect" label={t('office.recordInspection')} icon="📝" tone="btn-primary" fields={['outcome', 'notes', 'photoRequired', 'gpsRequired']} />);
@@ -115,7 +115,7 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     const approveFields = noIssue || !has(u, 'complaint.close') ? ['method', 'notes'] as const : ['method', 'notes', 'closeToggle'] as const;
     if (!noIssue || has(u, 'complaint.reject'))
       nodes.push(<ActionForm key={k('vc')} {...P} action="verify_completion" label={t(noIssue ? 'wf.confirmNoIssue' : 'office.approveClose')} icon="🏁" tone="btn-primary" fields={[...approveFields]} extra={{ decision: 'approve' }} defaults={{ method: 'EVIDENCE' }} />);
-    nodes.push(<ActionForm key={k('sb')} {...P} action="verify_completion" label={t('wf.sendRework')} icon="↩️" tone="btn-outline" fields={['method', 'notes']} extra={{ decision: 'send_back' }} defaults={{ method: 'EVIDENCE' }} />);
+    nodes.push(<ActionForm key={k('sb')} {...P} action="verify_completion" label={t('wf.sendRework')} icon="↩️" tone="btn-outline" fields={['method', 'notes', 'publicReason']} extra={{ decision: 'send_back' }} defaults={{ method: 'EVIDENCE' }} />);
     if (has(u, 'complaint.reject') && !noIssue) {
       nodes.push(<ActionForm key={k('vni')} {...P} action="verify_completion" label={t('wf.verifyNoIssue')} icon="🚫" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'no_issue' }} defaults={{ method: 'FIELD' }} />);
       nodes.push(<ActionForm key={k('vcv')} {...P} action="verify_completion" label={t('wf.verifyCannot')} icon="❔" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'cannot_verify' }} defaults={{ method: 'FIELD' }} />);

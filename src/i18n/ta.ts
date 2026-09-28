@@ -419,7 +419,7 @@ const ta: Messages = {
   'field.none': 'இப்போது பணிகள் எதுவும் இல்லை. 👍',
   'field.accept': 'ஏற்றுக்கொள்',
   'field.start': 'தொடங்கு',
-  'field.progress': 'முன்னேற்றம் பதிவேற்று',
+  'field.progress': 'நடவடிக்கை / முன்னேற்றம் சேர்',
   'field.complete': 'முடிந்தது',
   'field.completeTitle': 'பணியை முடி',
   'field.completionPhoto': 'பணி முடிந்த புகைப்படம் (அவசியம்)',
@@ -961,6 +961,20 @@ const ta: Messages = {
   'wf.noteEvent': 'குறிப்பு',
   'wf.visPublic': 'பொது',
   'wf.visInternal': 'உள்',
+
+  // Action workflow completion
+  'ct.received': 'புகார் பெறப்பட்டது',
+  'ct.reviewed': 'புகார் பரிசீலிக்கப்பட்டது',
+  'ct.underVerification': 'சரிபார்ப்பில்',
+  'ct.approved': 'சரிபார்ப்புக்குப் பின் ஒப்புதல்',
+  'ct.reworkCount': '{n} முறை மீண்டும் பணி கோரப்பட்டது',
+  'ct.reworkGeneric': 'முடிந்த பணி சரிபார்ப்பில் ஏற்கப்படவில்லை; மீண்டும் செய்யப்படுகிறது.',
+  'wf.noCitizenPhoto': 'குடிமகன் புகைப்படம் இணைக்கவில்லை.',
+  'wf.publicReason': 'குடிமகனுக்குக் காட்டப்படும் காரணம்',
+  'wf.publicReasonPh': 'எ.கா. தெரு விளக்கு இன்னும் எரியவில்லை; பொருத்தம் மாற்றப்படும்.',
+  'wf.workDone': 'செய்த நடவடிக்கை / பணி',
+  'wf.workDonePh': 'எ.கா. கம்பத்தை ஆய்வு செய்து பழுதான பொருத்தத்தை மாற்றினோம்.',
+  'wf.workDoneNeeded': 'செய்த பணியை விவரிக்கவும்.',
 };
 
 export default ta;

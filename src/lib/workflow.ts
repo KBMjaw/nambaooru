@@ -15,7 +15,8 @@ export const OPEN_STATUSES: Status[] = STATUSES.filter((s) => !FINAL.includes(s)
 /** Allowed transitions. The permission needed for each is checked by the caller's action. */
 export const TRANSITIONS: Record<Status, Status[]> = {
   DRAFT: ['SUBMITTED'],
-  SUBMITTED: ['AI_CLASSIFIED'],
+  // A complaint whose automatic classification step did not run is handled like "Received"
+  SUBMITTED: ['AI_CLASSIFIED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'REJECTED', 'DUPLICATE'],
   AI_CLASSIFIED: ['INITIAL_REVIEW', 'SITE_INSPECTION', 'REJECTED', 'DUPLICATE'],
   // A reopened complaint may go back to review, or straight back to the field team
   REOPENED: ['INITIAL_REVIEW', 'SITE_INSPECTION', 'ASSIGNED', 'REJECTED', 'DUPLICATE'],

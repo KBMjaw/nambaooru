@@ -17,23 +17,26 @@ export function CitizenTimeline({ d, lang }: { d: ComplaintDetail; lang: Lang })
   const workAssign = d.assignments.filter((a) => a.purpose === 'WORK' && ['PRIMARY', 'SUPERVISOR'].includes(a.assignee_role as string));
   const progress = d.updates.filter((u) => u.update_type === 'PROGRESS');
   const finished = ['CLOSED', 'REJECTED', 'DUPLICATE'].includes(status);
+  const reworks = d.history.filter((h) => h.to_status === 'REWORK_REQUIRED' && h.from_status !== h.to_status);
   const steps: { key: string; label: string; at: At; note?: string }[] = [
     { key: 'submitted', label: t('ct.submitted'), at: c.submitted_at as At },
-    { key: 'ack', label: t('ct.acknowledged'), at: first('INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED') },
-    { key: 'classified', label: t('ct.classified'), at: first('AI_CLASSIFIED'), note: [c.category_en, c.sub_en, c.issue_en].filter(Boolean).join(' › ') },
+    { key: 'received', label: t('ct.received'), at: first('AI_CLASSIFIED') ?? first('INITIAL_REVIEW'), note: [c.category_en, c.sub_en, c.issue_en].filter(Boolean).join(' › ') },
+    { key: 'reviewed', label: t('ct.reviewed'), at: first('INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED') },
     { key: 'dept', label: t('ct.department'), at: c.department_id ? (c.department_assigned_at as At) : null, note: (lang === 'ta' ? c.dept_ta ?? c.dept_en : c.dept_en) as string },
     { key: 'assigned', label: t('ct.assigned'), at: first('ASSIGNED') ?? (workAssign.at(-1)?.created_at as At) },
     { key: 'started', label: t('ct.started'), at: (c.work_started_at as At) ?? first('IN_PROGRESS') },
     { key: 'progress', label: t('ct.progress', { n: progress.length }), at: progress[0]?.created_at as At, note: progress[0]?.progress_pct != null ? `${progress[0].progress_pct}%` : undefined },
     { key: 'completed', label: t('ct.completed'), at: first('WORK_COMPLETED', 'VERIFICATION_PENDING') },
-    { key: 'verified', label: t('ct.verification'), at: first('COMPLETION_VERIFIED') },
+    { key: 'verifying', label: t('ct.underVerification'), at: first('VERIFICATION_PENDING'), note: reworks.length ? t('ct.reworkCount', { n: reworks.length }) : undefined },
+    { key: 'approved', label: t('ct.approved'), at: first('COMPLETION_VERIFIED') },
     { key: 'closed', label: finished && status !== 'CLOSED' ? `${t(`status.${status}` as MessageKey)}${c.resolution_type ? ` — ${t(`res.${c.resolution_type}` as MessageKey)}` : ''}` : t('ct.closed'),
-      at: finished ? ((c.resolved_at as At) ?? (c.closed_at as At) ?? first(status)) : null },
+      at: finished ? ((c.resolved_at as At) ?? (c.closed_at as At) ?? first(status)) : null,
+      note: status === 'REJECTED' || status === 'DUPLICATE' ? (c.rejection_notes as string) ?? undefined : status === 'CLOSED' ? (c.resolution_notes as string) ?? undefined : undefined },
   ];
   // Later events imply earlier ones (e.g. work can start without a separate "assigned" moment)
   const last = steps.reduce((m, s, i) => (s.at ? i : m), -1);
   const currentIdx = finished ? -1 : last + 1;
-  const sideNote = status === 'ON_HOLD' ? t('status.ON_HOLD') : status === 'REWORK_REQUIRED' ? t('status.REWORK_REQUIRED') : status === 'VERIFICATION_PENDING' ? t('status.VERIFICATION_PENDING') : null;
+  const sideNote = status === 'ON_HOLD' ? t('status.ON_HOLD') : status === 'REWORK_REQUIRED' ? `↻ ${t('status.REWORK_REQUIRED')}` : null;
   const rejected = status === 'REJECTED' || status === 'DUPLICATE';
   return (
     <ol className="relative">
