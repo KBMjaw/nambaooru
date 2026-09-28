@@ -64,6 +64,7 @@ export async function FieldHome() {
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-3 sm:flex sm:flex-wrap">
+          <Link href={`/office/complaints/${w.code}`} className="btn btn-navy">📄 {t('wf.openComplaint')}</Link>
           {lat != null && lng != null && <a href={navigateLink(lat, lng)} target="_blank" rel="noopener noreferrer" className="btn btn-outline">🧭 {t('complaint.navigate')}</a>}
           {w.purpose === 'INSPECTION' ? (
             <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="inspect" label={t('field.inspect')} icon="🔍" tone="btn-primary" fields={['outcome', 'notes', 'photoRequired', 'gpsRequired']} block /></div>
@@ -73,14 +74,15 @@ export async function FieldHome() {
               {['ASSIGNED', 'REWORK_REQUIRED'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="start" label={t(w.status === 'REWORK_REQUIRED' ? 'wf.startRework' : 'field.start')} icon="▶️" tone="btn-primary" fields={['photo', 'gps', 'note']} hint={t('wf.beforePhotoHint')} block /></div>}
               {w.status === 'IN_PROGRESS' && (
                 <>
-                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('field.complete')} icon="✅" tone="btn-primary" fields={['notes', 'photoRequired', 'gpsRequired', 'submitToggle']} block /></div>
+                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gps', 'submitToggle']} hint={t('wf.completeHint')} block /></div>
                   <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['progress', 'notes', 'photo', 'gps']} block /></div>
                 </>
               )}
               {['ASSIGNED', 'IN_PROGRESS'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} block /></div>}
               {['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="hold" label={t('wf.hold')} icon="⏸️" tone="btn-ghost" fields={['holdReason', 'note']} block /></div>}
               {w.status === 'ON_HOLD' && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="resume" label={t('wf.resume')} icon="▶️" tone="btn-primary" fields={['note']} block /></div>}
-              {w.status !== 'ON_HOLD' && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="note" label={t('wf.addNote')} icon="📝" tone="btn-ghost" fields={['notes', 'photo']} block /></div>}
+              <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="upload_evidence" label={t('wf.uploadEvidence')} icon="📷" tone="btn-outline" fields={['evidenceKind', 'photoRequired', 'gps', 'note']} defaults={{ evidenceKind: w.status === 'ASSIGNED' ? 'BEFORE_WORK' : 'PROGRESS' }} block /></div>
+              {w.status !== 'ON_HOLD' && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="note" label={t('wf.addNote')} icon="📝" tone="btn-ghost" fields={['visibility', 'notes', 'photo']} block /></div>}
             </>
           )}
         </div>

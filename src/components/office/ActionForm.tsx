@@ -10,7 +10,7 @@ import { Alert, Spinner } from '@/components/ui';
 export type FieldKind =
   | 'note' | 'notes' | 'photo' | 'photoRequired' | 'gps' | 'gpsRequired' | 'progress' | 'outcome' | 'reason'
   | 'assignee' | 'inspector' | 'dueAt' | 'priority' | 'closeToggle' | 'supporters' | 'noteRequired' | 'user'
-  | 'holdReason' | 'method' | 'submitToggle' | 'supervisor' | 'classify' | 'level' | 'dueRequired';
+  | 'holdReason' | 'method' | 'submitToggle' | 'supervisor' | 'classify' | 'level' | 'dueRequired' | 'visibility' | 'evidenceKind' | 'notesRequired';
 
 export interface ClassifyOpts {
   categories: { id: number; name: string }[];
@@ -65,6 +65,7 @@ export function ActionForm({
     if (needsPhoto && !photos.length) return setError(t('report.photoNeeded'));
     if (has('holdReason') && !v.reason) return setError(t('wf.holdReasonNeeded'));
     if (has('dueRequired') && !v.dueAt) return setError(t('wf.dueNeeded'));
+    if (has('notesRequired') && (v.notes ?? '').trim().length < 5) return setError(t('wf.notesNeeded'));
     if (fieldVerify && (v.notes ?? '').trim().length < 3) return setError(t('wf.fieldNotesNeeded'));
     if (needsGps && !geo) return setError(t('field.needLocation'));
     if (has('noteRequired') && (v.note ?? '').trim().length < 3) return setError(t('err.reasonRequired'));
@@ -156,6 +157,24 @@ export function ActionForm({
             </label>
           ))}
         </fieldset>
+      )}
+      {has('visibility') && (
+        <fieldset className="grid grid-cols-2 gap-2">
+          {(['INTERNAL', 'PUBLIC'] as const).map((m) => (
+            <label key={m} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${(v.visibility ?? 'INTERNAL') === m ? 'border-navy-600 bg-white ring-2 ring-navy-100' : 'border-slate-200 bg-white'}`}>
+              <input type="radio" name={`vis-${code}-${action}`} checked={(v.visibility ?? 'INTERNAL') === m} onChange={() => set('visibility', m)} className="mt-1" />
+              <span><b>{t(m === 'INTERNAL' ? 'wf.noteInternal' : 'wf.notePublic')}</b><span className="block text-xs text-slate-500">{t(m === 'INTERNAL' ? 'wf.noteInternalHint' : 'wf.notePublicHint')}</span></span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {has('evidenceKind') && (
+        <label className="block"><span className="label">{t('wf.evidenceKind')}</span>
+          <select className="input" value={v.evidenceKind ?? 'PROGRESS'} onChange={(e) => set('evidenceKind', e.target.value)}>
+            <option value="BEFORE_WORK">{t('evk.BEFORE_WORK')}</option>
+            <option value="PROGRESS">{t('evk.PROGRESS')}</option>
+          </select>
+        </label>
       )}
       {has('holdReason') && (
         <label className="block"><span className="label">{t('wf.holdReason')} *</span>
@@ -254,13 +273,13 @@ export function ActionForm({
           <input type="range" min={0} max={100} step={10} className="w-full" value={v.progress} onChange={(e) => set('progress', e.target.value)} />
         </label>
       )}
-      {has('notes') && (
-        <label className="block"><span className="label">{t('complaint.notes')}</span>
+      {(has('notes') || has('notesRequired')) && (
+        <label className="block"><span className="label">{has('notesRequired') ? `${t('wf.completionNote')} *` : t('complaint.notes')}</span>
           <textarea className="input min-h-20" value={v.notes ?? ''} onChange={(e) => set('notes', e.target.value)} maxLength={2000} />
         </label>
       )}
       {(has('note') || has('noteRequired')) && (
-        <label className="block"><span className="label">{has('noteRequired') ? `${t('admin.reason')} *` : `${t('office.note')} (${t('common.optional')})`}</span>
+        <label className="block"><span className="label">{has('noteRequired') ? `${has('visibility') ? t('office.note') : t('admin.reason')} *` : `${t('office.note')} (${t('common.optional')})`}</span>
           <textarea className="input min-h-16" value={v.note ?? ''} onChange={(e) => set('note', e.target.value)} maxLength={1000} />
         </label>
       )}

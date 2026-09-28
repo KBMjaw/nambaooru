@@ -48,6 +48,9 @@ export function myActionSql(u: AuthUser) {
         OR (a.purpose = 'INSPECTION' AND c.status = 'SITE_INSPECTION'))))`;
 }
 
+/** Positive integer from a query-string value, or null (so a malformed filter is ignored instead of erroring). */
+const int = (v?: string) => (v && /^\d{1,9}$/.test(v) ? Number(v) : null);
+
 export function filterSql(f: Filters, u?: AuthUser) {
   const parts = [sql`TRUE`];
   if (f.bucket === 'overdue') parts.push(sql`c.sla_due_at < now() AND c.status NOT IN ('CLOSED','REJECTED','DUPLICATE')`);
@@ -60,16 +63,16 @@ export function filterSql(f: Filters, u?: AuthUser) {
   else if (f.bucket === 'active') parts.push(sql`c.status IN ('ASSIGNED','IN_PROGRESS','ON_HOLD','REWORK_REQUIRED')`);
   else if (f.bucket && BUCKETS[f.bucket]) parts.push(sql`c.status IN ${sql(BUCKETS[f.bucket])}`);
   if (f.status) parts.push(sql`c.status = ${f.status}`);
-  if (f.ward) parts.push(sql`c.ward_id = ${Number(f.ward)}`);
-  if (f.street) parts.push(sql`c.street_id = ${Number(f.street)}`);
+  if (int(f.ward)) parts.push(sql`c.ward_id = ${int(f.ward)}`);
+  if (int(f.street)) parts.push(sql`c.street_id = ${int(f.street)}`);
   if (f.category) parts.push(sql`cat.code = ${f.category}`);
   if (f.priority) parts.push(sql`c.priority = ${f.priority}`);
-  if (f.dept) parts.push(sql`c.department_id = ${Number(f.dept)}`);
+  if (int(f.dept)) parts.push(sql`c.department_id = ${int(f.dept)}`);
   if (f.staff && /^[0-9a-f-]{36}$/i.test(f.staff)) parts.push(sql`(c.assigned_to = ${f.staff} OR EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.assigned_to = ${f.staff})
     OR EXISTS (SELECT 1 FROM complaint_actions ca JOIN complaint_action_assignees x ON x.action_id = ca.id WHERE ca.complaint_id = c.id AND x.user_id = ${f.staff} AND x.removed_at IS NULL))`);
-  if (f.lb && Number(f.lb)) parts.push(sql`c.local_body_id = ${Number(f.lb)}`);
-  if (f.district && Number(f.district)) parts.push(sql`c.local_body_id IN (SELECT id FROM local_bodies WHERE district_id = ${Number(f.district)})`);
-  if (f.taluk && Number(f.taluk)) parts.push(sql`c.local_body_id IN (SELECT id FROM local_bodies WHERE taluk_id = ${Number(f.taluk)})`);
+  if (int(f.lb)) parts.push(sql`c.local_body_id = ${int(f.lb)}`);
+  if (int(f.district)) parts.push(sql`c.local_body_id IN (SELECT id FROM local_bodies WHERE district_id = ${int(f.district)})`);
+  if (int(f.taluk)) parts.push(sql`c.local_body_id IN (SELECT id FROM local_bodies WHERE taluk_id = ${int(f.taluk)})`);
   if (f.escalated) parts.push(sql`c.escalated`);
   if (f.conflict) parts.push(sql`c.location_conflict`);
   if (f.from && /^\d{4}-\d{2}-\d{2}$/.test(f.from)) parts.push(sql`c.created_at >= ${f.from}::date`);

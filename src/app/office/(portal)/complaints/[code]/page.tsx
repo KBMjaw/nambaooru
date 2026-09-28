@@ -6,6 +6,7 @@ import { getT } from '@/i18n/server';
 import { complaintScope } from '@/lib/scope';
 import { getComplaintDetail, complaintWorkData } from '@/lib/complaint-detail';
 import { findDuplicates } from '@/lib/duplicates';
+import { auditLabel } from '@/lib/audit-labels';
 import { maskMobile } from '@/lib/crypto';
 import { fmtDateTime, mapsLink, navigateLink } from '@/lib/format';
 import { StatusBadge, PriorityBadge } from '@/components/badges';
@@ -16,6 +17,7 @@ import { ActionForm } from '@/components/office/ActionForm';
 import { TakeAction } from '@/components/office/TakeAction';
 import { complaintActions } from '@/components/office/complaintActions';
 import { WorkflowSections } from '@/components/office/WorkflowSections';
+import { OfficeTimeline } from '@/components/office/OfficeTimeline';
 import { ComplaintMiniMap } from '@/components/office/ComplaintMiniMap';
 import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
 import type { MessageKey } from '@/i18n';
@@ -61,6 +63,16 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
   const lat = (c.latitude as number | null) ?? null;
   const lng = (c.longitude as number | null) ?? null;
   const overdue = open && c.sla_due_at && new Date(c.sla_due_at as string) < new Date();
+  // Who has to act now
+  const activeA = (role: string) => d.assignments.find((a) => a.purpose === 'WORK' && a.assignee_role === role && ['PENDING', 'ACCEPTED', 'IN_PROGRESS'].includes(a.status as string));
+  const who = (a: Record<string, unknown> | undefined) => (a ? `${a.assignee_name} (${L(a.assignee_role_en, a.assignee_role_ta)})` : null);
+  const responsible = !open ? null
+    : ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'].includes(status) ? who(activeA('PRIMARY'))
+    : ['WORK_COMPLETED', 'VERIFICATION_PENDING', 'COMPLETION_VERIFIED'].includes(status) ? (who(activeA('VERIFIER')) ?? who(activeA('SUPERVISOR')) ?? `${L(c.dept_en, c.dept_ta)} — ${t('wf.verifyingOfficer')}`)
+    : status === 'SITE_INSPECTION' ? (c.inspector_name as string | null)
+    : `${L(c.dept_en, c.dept_ta) || '—'} — ${t('wf.reviewingOfficer')}`;
+  const finalEvent = !open ? [...d.history].reverse().find((h) => h.to_status === status) : undefined;
+  const citizenEvidence = d.evidence.filter((e) => e.kind === 'CITIZEN');
   const evidencePoints = d.evidence.filter((e) => e.latitude != null).map((e) => ({ lat: e.latitude as number, lng: e.longitude as number, kind: e.kind as string }));
 
   return (
@@ -83,8 +95,8 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
           <span>🏛️ {L(c.dept_en, c.dept_ta) || '—'}</span>
           <span>🗓️ {fmtDateTime(c.submitted_at as string, lang)}</span>
           <span>⏳ {t('complaint.dueIn')}: {fmtDateTime(c.sla_due_at as string, lang)}</span>
-          {c.assigned_name && <span>👷 {c.assigned_name as string}</span>}
         </div>
+        {responsible && <p className="mt-2 text-sm"><span className="font-semibold text-slate-500">{t('wf.responsibleNow')}:</span> <b className="text-slate-800">{responsible}</b></p>}
         {c.location_conflict && <div className="mt-2"><Alert tone="warn">📍 {t('complaint.locationFlag')}: {c.location_conflict_note as string}</Alert></div>}
         {(c.escalation_level as number) > 0 && c.escalation_note && <div className="mt-2"><Alert tone="warn">⬆️ {c.escalation_note as string}</Alert></div>}
         {c.info_requested_at && <div className="mt-2"><Alert tone="info">❓ {t('info.waiting')}: {c.info_request_note as string}</Alert></div>}
@@ -92,7 +104,12 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
         {status === 'REWORK_REQUIRED' && d.completions[0]?.verification_notes && <div className="mt-2"><Alert tone="error">↩️ {t('status.REWORK_REQUIRED')}: {d.completions[0].verification_notes as string}</Alert></div>}
         {status === 'SITE_INSPECTION' && c.inspection_outcome && <div className="mt-2"><Alert tone="info">🔍 {t('office.inspectionOutcomeWaiting')}: <b>{t(`outcome.${c.inspection_outcome}` as MessageKey)}</b></Alert></div>}
         {(status === 'REJECTED' || status === 'DUPLICATE') && (
-          <div className="mt-2"><Alert tone="error">{t(`reason.${c.rejection_reason}` as MessageKey)} — {c.rejection_notes as string}{c.duplicate_of_code ? ` (${c.duplicate_of_code})` : ''}</Alert></div>
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+            <p className="font-bold">⛔ {t(`status.${status}` as MessageKey)}: {t(`reason.${c.rejection_reason}` as MessageKey)}{c.duplicate_of_code ? <> — <Link className="underline" href={`/office/complaints/${c.duplicate_of_code}`}>{c.duplicate_of_code as string}</Link></> : null}</p>
+            {c.rejection_notes && <p className="mt-0.5">{c.rejection_notes as string}</p>}
+            <p className="mt-1 text-xs text-red-800">{t('wf.decidedBy')}: {(c.resolved_by_name as string) ?? (finalEvent?.actor_label as string) ?? t('wf.system')}{(c.resolved_at ?? finalEvent?.created_at) ? ` · ${fmtDateTime((c.resolved_at ?? finalEvent?.created_at) as string, lang)}` : ''}</p>
+            <p className="mt-1 text-xs">{pendingAppeals.length ? `🔁 ${t('appeal.pending')}` : has(u, 'complaint.reopen') ? t('wf.notAcceptedNextEo') : t('wf.notAcceptedNext')}</p>
+          </div>
         )}
       </div>
 
@@ -102,7 +119,21 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          <Section title={t('complaint.evidence')}>
+          <Section title={`🧑 ${t('wf.citizenSubmission')}`}>
+            <p className="whitespace-pre-line text-slate-800">“{c.original_text as string}”</p>
+            <p className="mt-1 text-xs text-slate-400">{c.input_mode === 'VOICE' ? '🎙️ Voice' : '⌨️ Text'} · {c.detected_language as string} · {fmtDateTime(c.submitted_at as string, lang)}</p>
+            {ai.translation_en && <p className="mt-2 text-sm text-slate-600">EN: {ai.translation_en}</p>}
+            <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+              <div><dt className="inline text-slate-500">{t('wf.category')}: </dt><dd className="inline font-semibold">{c.icon as string} {[L(c.category_en, c.category_ta), L(c.sub_en, c.sub_ta), L(c.issue_en, c.issue_ta)].filter(Boolean).join(' › ')}</dd></div>
+              <div><dt className="inline text-slate-500">{t('complaint.location')}: </dt><dd className="inline font-semibold">{location || '—'}{c.landmark ? ` · ${c.landmark}` : ''}</dd></div>
+              <div><dt className="inline text-slate-500">{t('office.citizenContact')}: </dt><dd className="inline font-semibold">{c.citizen_name as string} · 📞 {has(u, 'citizen.pii.view') ? <a className="underline" href={`tel:+91${c.citizen_mobile}`}>{c.citizen_mobile as string}</a> : maskMobile(c.citizen_mobile as string)}</dd></div>
+              <div><dt className="inline text-slate-500">{t('complaint.submitted')}: </dt><dd className="inline font-semibold">{fmtDateTime(c.submitted_at as string, lang)}</dd></div>
+            </dl>
+            <p className="mb-2 mt-3 text-sm font-bold text-slate-600">{t('evk.CITIZEN')} ({citizenEvidence.length})</p>
+            {citizenEvidence.length ? <EvidenceGrid evidence={citizenEvidence as never} lang={lang} /> : <p className="text-sm text-slate-500">—</p>}
+          </Section>
+
+          <Section title={`🛠️ ${t('wf.workEvidence')}`}>
             <BeforeAfter evidence={d.evidence as never} lang={lang} />
             {(['BEFORE_WORK', 'PROGRESS', 'COMPLETION', 'INSPECTION', 'VERIFICATION', 'APPEAL'] as const).filter((kind) => d.evidence.some((e) => e.kind === kind)).map((kind) => (
               <div key={kind} className="mt-4">
@@ -119,14 +150,18 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
             <p className="mt-2 text-xs text-slate-500">{lat != null ? `GPS ${lat.toFixed(5)}, ${lng!.toFixed(5)} ±${Math.round((c.gps_accuracy_m as number) ?? 0)}m · ${fmtDateTime(c.gps_captured_at as string, lang)}` : 'No GPS — local body centre shown'}</p>
           </Section>
 
-          <Section title={t('complaint.original')}>
-            <p className="italic text-slate-700">“{c.original_text as string}”</p>
-            <p className="mt-1 text-xs text-slate-400">{c.input_mode === 'VOICE' ? '🎙️ Voice' : '⌨️ Text'} · {c.detected_language as string}</p>
-            {ai.translation_en && <p className="mt-2 text-sm text-slate-600">EN: {ai.translation_en}</p>}
-          </Section>
-
           <Section title={`🛠️ ${t('actions.title')} (${work.actions.length})`}>
             <ActionsPanel code={code} portal="OFFICE" actions={work.actions as ActionRow[]} staff={work.staffWithSelf} departments={work.departments} perms={work.perms} meId={u.id} open={open} />
+          </Section>
+
+          <Section title={`🧾 ${t('wf.fullTimeline')}`}>
+            <OfficeTimeline d={d} lang={lang} />
+            {audits.length > 0 && (
+              <details className="mt-3 text-xs">
+                <summary className="cursor-pointer text-slate-500">{t('nav.audit')} ({audits.length})</summary>
+                <ul className="mt-1 space-y-1">{audits.map((a, i) => { const l = auditLabel(a.action as string); return <li key={i}>{fmtDateTime(a.created_at as string, lang)} · {(a.full_name as string) ?? a.actor_role as string} · {l.icon} {l.label}</li>; })}</ul>
+              </details>
+            )}
           </Section>
 
           {(d.inspections.length > 0 || d.updates.length > 0) && (
@@ -170,33 +205,11 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
             <p className="mt-2 text-[11px] text-slate-400">{t('office.aiDisclaimer')}</p>
           </Section>
 
-          <Section title={`👤 ${t('office.citizenContact')}`}>
-            <p className="text-sm font-semibold">{c.citizen_name as string}</p>
-            <p className="text-sm text-slate-600">📞 {has(u, 'citizen.pii.view') ? <a className="underline" href={`tel:+91${c.citizen_mobile}`}>{c.citizen_mobile as string}</a> : maskMobile(c.citizen_mobile as string)}</p>
-          </Section>
-
           <Section title={t('complaint.timeline')}>
             <Timeline history={d.history.map((h) => ({ to_status: h.to_status as string, created_at: h.created_at as string }))} status={status} lang={lang} />
           </Section>
 
-          <Section title={`🧾 ${t('office.history')}`}>
-            <ol className="space-y-2 text-xs">
-              {[...d.history].reverse().map((h) => (
-                <li key={h.id as number} className="border-l-2 border-slate-200 pl-2">
-                  <span className="font-semibold text-slate-700">{h.from_status === h.to_status ? '📝' : `${h.from_status ? t(`status.${h.from_status}` as MessageKey) : '—'} → ${t(`status.${h.to_status}` as MessageKey)}`}</span>
-                  {!h.public_note && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">internal</span>}
-                  <div className="text-slate-500">{(h.actor_label as string) ?? 'System'} · {fmtDateTime(h.created_at as string, lang)}</div>
-                  {h.note && <div className="text-slate-700">{h.note as string}</div>}
-                </li>
-              ))}
-            </ol>
-            {audits.length > 0 && (
-              <details className="mt-3 text-xs">
-                <summary className="cursor-pointer text-slate-500">Audit log ({audits.length})</summary>
-                <ul className="mt-1 space-y-1">{audits.map((a, i) => <li key={i}>{fmtDateTime(a.created_at as string, lang)} · {(a.full_name as string) ?? a.actor_role as string} · <code>{a.action as string}</code></li>)}</ul>
-              </details>
-            )}
-          </Section>
+
         </div>
       </div>
     </div>

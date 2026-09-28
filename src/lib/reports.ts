@@ -69,7 +69,7 @@ export async function reportFilterOptions(u: AuthUser, f: Filters) {
   const none = sql`SELECT NULL WHERE false`;
   const [districts, taluks, wards, depts, cats, staff] = await Promise.all([
     lbIds.length ? sql`SELECT DISTINCT d.id, d.name_en FROM districts d JOIN local_bodies lb ON lb.district_id = d.id WHERE lb.id IN ${sql(lbIds)} ORDER BY d.name_en` : none,
-    lbIds.length ? sql`SELECT DISTINCT t.id, t.name_en FROM taluks t JOIN local_bodies lb ON lb.taluk_id = t.id WHERE lb.id IN ${sql(lbIds)} ${f.district ? sql`AND lb.district_id = ${Number(f.district)}` : sql``} ORDER BY t.name_en` : none,
+    lbIds.length ? sql`SELECT DISTINCT t.id, t.name_en FROM taluks t JOIN local_bodies lb ON lb.taluk_id = t.id WHERE lb.id IN ${sql(lbIds)} ${Number(f.district) ? sql`AND lb.district_id = ${Number(f.district)}` : sql``} ORDER BY t.name_en` : none,
     f.lb && lbIds.includes(Number(f.lb)) ? sql`SELECT id, ward_number FROM wards WHERE local_body_id = ${Number(f.lb)} ORDER BY ward_number` : none,
     lbIds.length ? sql`SELECT id, name_en FROM departments WHERE status = 'ACTIVE' AND local_body_id IN ${sql(f.lb && lbIds.includes(Number(f.lb)) ? [Number(f.lb)] : lbIds)} ORDER BY name_en` : none,
     sql`SELECT code, name_en FROM complaint_categories WHERE status = 'ACTIVE' ORDER BY sort_order`,

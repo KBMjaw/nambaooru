@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useI18n } from '@/i18n/client';
 import { StatusBadge, PriorityBadge } from '@/components/badges';
 import { fmtDate, timeAgo } from '@/lib/format';
@@ -12,6 +13,7 @@ export interface Row {
 
 export function ComplaintsTable({ rows, compact = false, base = '/office/complaints' }: { rows: Row[]; compact?: boolean; base?: string }) {
   const { t, lang } = useI18n();
+  const router = useRouter();
   if (!rows.length) return <p className="py-8 text-center text-sm text-slate-500">{t('office.noResults')}</p>;
   const isOpen = (s: string) => !['CLOSED', 'REJECTED', 'DUPLICATE'].includes(s);
   const flags = (r: Row) => (
@@ -53,7 +55,10 @@ export function ComplaintsTable({ rows, compact = false, base = '/office/complai
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.code} className="cursor-pointer">
+              // The whole row opens the complaint (the number stays a real link for keyboard / new-tab use)
+              <tr key={r.code} className="cursor-pointer hover:bg-navy-50/60" tabIndex={0} aria-label={`${t('wf.openComplaint')} ${r.code}`}
+                onClick={(e) => { if (!(e.target as HTMLElement).closest('a,button,input,select')) router.push(`${base}/${r.code}`); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') router.push(`${base}/${r.code}`); }}>
                 <td className="whitespace-nowrap"><Link className="font-mono text-xs font-bold text-navy-700 hover:underline" href={`${base}/${r.code}`}>{r.code}</Link> <span className="ml-1">{flags(r)}</span></td>
                 <td>{r.icon} {lang === 'ta' ? r.category_ta : r.category_en}</td>
                 <td className="max-w-[14rem] truncate">{place(r)}</td>

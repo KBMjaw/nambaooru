@@ -81,7 +81,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
     case 'review': {
       need('complaint.review');
       requireStatus('AI_CLASSIFIED', 'REOPENED', 'SUBMITTED');
-      await transition(id, 'INITIAL_REVIEW', u, { note: str(data.note) });
+      await transition(id, 'INITIAL_REVIEW', u, { note: str(data.note), publicNote: false });
       break;
     }
 
@@ -94,7 +94,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       await sql`UPDATE assignments SET status = 'REASSIGNED' WHERE complaint_id = ${id} AND purpose = 'INSPECTION' AND status IN ('PENDING','ACCEPTED','IN_PROGRESS')`;
       await sql`INSERT INTO assignments (complaint_id, assigned_to, assigned_by, department_id, purpose, priority, due_at, note)
                 VALUES (${id}, ${inspectorId}, ${u.id}, ${c.department_id}, 'INSPECTION', ${c.priority}, ${due}, ${str(data.note)})`;
-      await transition(id, 'SITE_INSPECTION', u, { note: str(data.note), set: { inspector_id: inspectorId, inspection_outcome: null } });
+      await transition(id, 'SITE_INSPECTION', u, { note: str(data.note), publicNote: false, set: { inspector_id: inspectorId, inspection_outcome: null } });
       if (inspectorId !== u.id) await notify(inspectorId, 'INSPECTION_ASSIGNED', { code, category_en: c.cat_en as string, category_ta: c.cat_ta as string }, id);
       await audit(u, { action: 'INSPECTION_SCHEDULED', entityType: 'complaint', entityId: code, targetUserId: inspectorId, newValue: { inspector: inspector.full_name, due } });
       break;
@@ -114,7 +114,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       await sql`UPDATE assignments SET status = 'COMPLETED', completed_at = now() WHERE complaint_id = ${id} AND purpose = 'INSPECTION' AND status IN ('PENDING','ACCEPTED','IN_PROGRESS')`;
       await audit(u, { action: 'INSPECTION_COMPLETED', entityType: 'complaint', entityId: code, newValue: { outcome, notes, lat: geo.latitude, lng: geo.longitude, evidenceId } });
       if (outcome === 'VERIFIED') {
-        await transition(id, 'VERIFIED', u, { note: `Site inspection: issue verified. ${notes}`, set: { inspection_outcome: outcome } });
+        await transition(id, 'VERIFIED', u, { note: `Site inspection: issue verified. ${notes}`, publicNote: false, set: { inspection_outcome: outcome } });
       } else {
         // Negative outcomes are recorded; an authorised officer takes the final decision (reject / duplicate / escalate).
         const escalate = outcome === 'REQUIRES_HIGHER_AUTHORITY';
@@ -130,7 +130,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       need('complaint.review');
       requireStatus('INITIAL_REVIEW');
       if (c.inspection_required) throw badRequest('Site inspection is mandatory for this category');
-      await transition(id, 'VERIFIED', u, { note: str(data.note) ?? 'Verified without site inspection (not required for this category)' });
+      await transition(id, 'VERIFIED', u, { note: str(data.note) ?? 'Verified without site inspection (not required for this category)', publicNote: false });
       break;
     }
 
@@ -279,6 +279,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       }
       const team = [assignee.full_name, ...supporters.map((x) => x.full_name)].join(', ') + (supervisor ? `; supervisor ${supervisor.full_name}` : '');
       await transition(id, 'ASSIGNED', u, {
+        publicNote: false, // team names and instructions are internal; the citizen sees the "Assigned" step
         note: `${reassign ? 'Reassigned' : 'Assigned'} to ${team}${data.note ? ` — ${str(data.note)}` : ''}`,
         set: { assigned_to: assigneeId, priority, department_id: assignee.department_id ?? c.department_id },
         skipCitizenNotify: reassign,
@@ -352,7 +353,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
                   WHERE complaint_id = ${id} AND purpose = 'WORK' AND assignee_role IN ('PRIMARY','SUPPORT') AND status IN ('PENDING','ACCEPTED')`;
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, evidence_id, latitude, longitude)
                   VALUES (${id}, ${a.id}, ${u.id}, 'STARTED', ${str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : null)}, ${before[0] ?? null}, ${geo.latitude}, ${geo.longitude})`;
-        await transition(id, 'IN_PROGRESS', u, { note: str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : 'Work started'), auditAction: 'WORK_STARTED' });
+        await transition(id, 'IN_PROGRESS', u, { note: str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : 'Work started'), publicNote: !str(data.note) && status !== 'REWORK_REQUIRED', auditAction: 'WORK_STARTED' });
       } else if (action === 'progress') {
         requireStatus('IN_PROGRESS');
         const notes = z.string().trim().min(2).max(2000).parse(data.notes);
@@ -366,17 +367,21 @@ export const POST = route<Ctx>(async (req, { params }) => {
       } else if (action === 'note') {
         requireStatus('ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED');
         const notes = z.string().trim().min(2).max(2000).parse(data.notes);
+        const visibility = z.enum(['INTERNAL', 'PUBLIC']).parse(data.visibility ?? 'INTERNAL');
         const ids = await storeAll('PROGRESS');
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, evidence_id, latitude, longitude)
                   VALUES (${id}, ${a.id}, ${u.id}, 'NOTE', ${notes}, ${ids[0] ?? null}, ${geo.latitude}, ${geo.longitude})`;
-        await addHistoryNote(id, status, u, `Field note: ${notes}`, false);
-        await audit(u, { action: 'WORK_NOTE_ADDED', entityType: 'complaint', entityId: code, newValue: { notes, evidenceIds: ids } });
+        await addHistoryNote(id, status, u, visibility === 'PUBLIC' ? notes : `Field note: ${notes}`, visibility === 'PUBLIC');
+        await audit(u, { action: 'WORK_NOTE_ADDED', entityType: 'complaint', entityId: code, newValue: { notes, visibility, evidenceIds: ids } });
+        if (visibility === 'PUBLIC') await notify(c.citizen_id as string, 'PUBLIC_UPDATE', { code, reason: notes }, id);
       } else {
         const noIssue = action === 'report_no_issue';
         requireStatus(...(noIssue ? ['ASSIGNED', 'IN_PROGRESS'] : ['IN_PROGRESS']));
-        const notes = z.string().trim().min(noIssue ? 5 : 3).max(2000).parse(data.notes);
+        const notes = z.string().trim().min(5, noIssue ? 'Notes are required' : 'A completion note is required').max(2000).parse(data.notes);
+        // The after-work (reference) photo is mandatory; GPS is recorded when the phone provides it, and is
+        // mandatory only for a "no issue found" report, which rests entirely on the site visit.
         if (!photos.length) throw badRequest(noIssue ? 'Site photo is required' : 'field.completionPhoto');
-        if (geo.latitude == null || geo.longitude == null) throw badRequest('field.needLocation');
+        if (noIssue && (geo.latitude == null || geo.longitude == null)) throw badRequest('field.needLocation');
         // Field evidence is stored separately from the citizen's evidence and never replaces it
         const ids = await storeAll(noIssue ? 'INSPECTION' : 'COMPLETION');
         await sql`INSERT INTO completion_evidence (complaint_id, assignment_id, evidence_id, notes, latitude, longitude, gps_accuracy_m, completed_by, proposed_resolution)
@@ -404,7 +409,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       requireStatus('WORK_COMPLETED');
       const [mine] = await sql`SELECT 1 FROM assignments WHERE complaint_id = ${id} AND purpose = 'WORK' AND assigned_to = ${u.id} AND assignee_role IN ('PRIMARY','SUPPORT') AND status = 'COMPLETED'`;
       if (!(mine && has(u, 'complaint.work')) && !has(u, 'complaint.verify')) throw forbidden();
-      await transition(id, 'VERIFICATION_PENDING', u, { note: str(data.note) ?? 'Submitted for verification' });
+      await transition(id, 'VERIFICATION_PENDING', u, { note: str(data.note) ?? 'Submitted for verification', publicNote: !str(data.note) });
       await notifyOfficials(id, 'WORK_REVIEW', {}, { includeWardMember: false });
       for (const s of await supervisors()) await notify(s, 'WORK_REVIEW', catVars, id);
       break;
@@ -430,7 +435,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       } else {
         requireStatus('ON_HOLD');
         const to = c.work_started_at ? 'IN_PROGRESS' : 'ASSIGNED';
-        await transition(id, to, u, { note: str(data.note) ?? 'Work resumed', citizenTemplate: 'RESUMED', auditAction: 'WORK_RESUMED' });
+        await transition(id, to, u, { note: str(data.note) ?? 'Work resumed', publicNote: !str(data.note), citizenTemplate: 'RESUMED', auditAction: 'WORK_RESUMED' });
         await sql`INSERT INTO work_updates (complaint_id, user_id, update_type, notes) VALUES (${id}, ${u.id}, 'RESUMED', ${str(data.note)})`;
       }
       break;
@@ -481,7 +486,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
             notifyVars: { reason_en: REASON_LABEL.NOT_FOUND.en, reason_ta: REASON_LABEL.NOT_FOUND.ta },
           });
         } else {
-          await transition(id, 'COMPLETION_VERIFIED', u, { note: `Completion verified by ${how}${notes ? `: ${notes}` : ''}` });
+          await transition(id, 'COMPLETION_VERIFIED', u, { note: `Completion verified by ${how}${notes ? `: ${notes}` : ''}`, publicNote: false });
           if (data.close === true) {
             need('complaint.close');
             await transition(id, 'CLOSED', u, { note: notes ?? 'Closed after verification', set: { resolution_type: 'RESOLVED', resolution_notes: notes } });
@@ -494,7 +499,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
         const back = await sql`UPDATE assignments SET status = 'ACCEPTED', completed_at = NULL WHERE complaint_id = ${id} AND purpose = 'WORK' AND status = 'COMPLETED'
                                AND assignee_role = 'SUPPORT' AND completed_at >= (SELECT completed_at FROM completion_evidence WHERE id = ${ce.id}) - interval '1 minute' RETURNING assigned_to`;
         if (wa) await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes) VALUES (${id}, ${wa.id}, ${u.id}, 'SENT_BACK', ${notes})`;
-        await transition(id, 'REWORK_REQUIRED', u, { note: `Rework required (${how}): ${notes}`, skipCitizenNotify: true });
+        await transition(id, 'REWORK_REQUIRED', u, { note: `Rework required (${how}): ${notes}`, publicNote: false, skipCitizenNotify: true });
         for (const x of [wa, ...back].filter(Boolean)) await notify(x.assigned_to as string, 'REWORK_REQUIRED', { code, reason: notes }, id);
       }
       break;
@@ -555,10 +560,35 @@ export const POST = route<Ctx>(async (req, { params }) => {
     }
 
     case 'remark': {
-      need('complaint.remark');
+      // Action note: officials with complaint.remark, or anyone currently on this complaint's team.
+      // INTERNAL notes are never shown to the citizen; PUBLIC notes appear on the citizen's timeline.
+      if (!has(u, 'complaint.remark')) {
+        const [onTeam] = await sql`SELECT 1 FROM assignments WHERE complaint_id = ${id} AND assigned_to = ${u.id} AND status IN ${sql(ACTIVE_A)}`;
+        if (!onTeam) throw forbidden();
+      }
       const note = z.string().trim().min(2).max(1000).parse(data.note);
-      await addHistoryNote(id, c.status as string, u, note, false);
-      await audit(u, { action: 'COMPLAINT_REMARK', entityType: 'complaint', entityId: code, newValue: { note } });
+      const visibility = z.enum(['INTERNAL', 'PUBLIC']).parse(data.visibility ?? 'INTERNAL');
+      await addHistoryNote(id, status, u, note, visibility === 'PUBLIC');
+      await audit(u, { action: 'COMPLAINT_REMARK', entityType: 'complaint', entityId: code, newValue: { note, visibility } });
+      if (visibility === 'PUBLIC') await notify(c.citizen_id as string, 'PUBLIC_UPDATE', { code, reason: note }, id);
+      break;
+    }
+
+    case 'upload_evidence': {
+      // Work evidence (before-work condition or work in progress). Never replaces the citizen's evidence.
+      if (!has(u, 'evidence.upload') && !has(u, 'complaint.work')) throw forbidden();
+      requireStatus('ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'SITE_INSPECTION', 'VERIFIED');
+      if (u.scope === 'ASSIGNED') {
+        const [onTeam] = await sql`SELECT 1 FROM assignments WHERE complaint_id = ${id} AND assigned_to = ${u.id} AND status IN ${sql(ACTIVE_A)}`;
+        if (!onTeam) throw forbidden('This work is not assigned to you');
+      }
+      const kind = z.enum(['BEFORE_WORK', 'PROGRESS']).parse(data.evidenceKind ?? 'PROGRESS');
+      if (!photos.length) throw badRequest('report.photoNeeded');
+      const note = str(data.note);
+      const ids = await storeAll(kind);
+      await sql`INSERT INTO work_updates (complaint_id, user_id, update_type, notes, evidence_id, latitude, longitude)
+                VALUES (${id}, ${u.id}, 'NOTE', ${note ?? `${ids.length} photo(s) uploaded (${kind === 'BEFORE_WORK' ? 'before work' : 'progress'})`}, ${ids[0]}, ${geo.latitude}, ${geo.longitude})`;
+      await addHistoryNote(id, status, u, `${ids.length} ${kind === 'BEFORE_WORK' ? 'before-work' : 'progress'} photo(s) uploaded${note ? `: ${note}` : ''}`, false);
       break;
     }
 

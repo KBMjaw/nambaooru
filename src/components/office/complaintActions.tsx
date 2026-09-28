@@ -62,13 +62,16 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
       if (myWork!.status === 'PENDING') nodes.push(<ActionForm key={k('acc')} {...P} action="accept" label={t('field.accept')} icon="👍" />);
     }
     if (status === 'IN_PROGRESS') {
-      nodes.push(<ActionForm key={k('cp')} {...P} action="complete" label={t('field.complete')} icon="✅" tone="btn-primary" fields={['notes', 'photoRequired', 'gpsRequired', 'submitToggle']} />);
+      nodes.push(<ActionForm key={k('cp')} {...P} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gps', 'submitToggle']} hint={t('wf.completeHint')} />);
       nodes.push(<ActionForm key={k('pr')} {...P} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['progress', 'notes', 'photo', 'gps']} />);
     }
     if (['ASSIGNED', 'IN_PROGRESS'].includes(status))
       nodes.push(<ActionForm key={k('ni')} {...P} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} />);
-    if (WORK.includes(status)) nodes.push(<ActionForm key={k('fn')} {...P} action="note" label={t('wf.addNote')} icon="📝" tone="btn-ghost" fields={['notes', 'photo']} />);
+    if (WORK.includes(status)) nodes.push(<ActionForm key={k('fn')} {...P} action="note" label={t('wf.addNote')} icon="📝" tone="btn-outline" fields={['visibility', 'notes', 'photo']} />);
   }
+  const onTeam = d.assignments.some((a) => a.assigned_to === u.id && ACTIVE.includes(a.status as string));
+  if ((fieldActor || (has(u, 'evidence.upload') && u.scope !== 'ASSIGNED')) && ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'SITE_INSPECTION', 'VERIFIED'].includes(status))
+    nodes.push(<ActionForm key={k('ue')} {...P} action="upload_evidence" label={t('wf.uploadEvidence')} icon="📷" tone="btn-outline" fields={['evidenceKind', 'photoRequired', 'gps', 'note']} defaults={{ evidenceKind: status === 'ASSIGNED' ? 'BEFORE_WORK' : 'PROGRESS' }} />);
   const canHold = fieldActor || has(u, 'complaint.reassign');
   if (canHold && ['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(status))
     nodes.push(<ActionForm key={k('hold')} {...P} action="hold" label={t('wf.hold')} icon="⏸️" tone="btn-outline" fields={['holdReason', 'note']} />);
@@ -124,11 +127,12 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     nodes.push(<ActionForm key={k('rj')} {...P} action="reject" label={t('wf.resolveAs')} icon="⛔" tone="btn-danger" fields={['reason', 'notes']}
       defaults={c.inspection_outcome && !['VERIFIED', 'REQUIRES_HIGHER_AUTHORITY'].includes(c.inspection_outcome as string) ? { reason: c.inspection_outcome as string } : {}} />);
   if (!open && has(u, 'complaint.reopen'))
-    nodes.push(<ActionForm key={k('ro')} {...P} action="reopen" label={t('office.reopen')} icon="🔓" tone="btn-outline" fields={['noteRequired']} />);
+    nodes.push(<ActionForm key={k('ro')} {...P} action="reopen" label={t(status === 'CLOSED' ? 'office.reopen' : 'wf.acceptComplaint')} icon="🔓" tone={status === 'CLOSED' ? 'btn-outline' : 'btn-primary'} fields={['noteRequired']} hint={status === 'CLOSED' ? undefined : t('wf.acceptHint')} />);
   if (open && has(u, 'complaint.escalate') && (c.escalation_level as number) < 4)
     nodes.push(<ActionForm key={k('esc')} {...P} action="escalate" label={t('office.escalate')} icon="⬆️" tone="btn-outline" fields={['level', 'note']} />);
-  if (has(u, 'complaint.remark'))
-    nodes.push(<ActionForm key={k('rm')} {...P} action="remark" label={t('office.remark')} icon="💬" tone="btn-ghost" fields={['note']} />);
+  // Field staff write notes through their own "Add note" (above); others use the action note
+  if ((has(u, 'complaint.remark') || onTeam) && !fieldActor)
+    nodes.push(<ActionForm key={k('rm')} {...P} action="remark" label={t('wf.actionNote')} icon="💬" tone="btn-outline" fields={['visibility', 'noteRequired']} />);
 
   const nextKey = (status === 'VERIFICATION_PENDING' && noIssue ? 'next.NO_ISSUE' : `next.${status}`) as MessageKey;
   const holdText = status === 'ON_HOLD' && c.on_hold_reason ? ` — ${t(`hold.${c.on_hold_reason}` as MessageKey)}${c.on_hold_note ? `: ${c.on_hold_note}` : ''}` : '';
