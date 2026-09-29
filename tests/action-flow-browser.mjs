@@ -27,8 +27,19 @@ const GEO = { latitude: 11.165, longitude: 77.604 };
 const photo = (n) => ({ name: `${n}.jpg`, mimeType: 'image/jpeg', buffer: JPG });
 
 const browser = await chromium.launch({ executablePath: exe });
+// CSP / JavaScript health on every page: CSP violation events, "Refused to …" console messages, uncaught JS errors
+const cspIssues = []; const jsErrors = []; const otherConsole = [];
 async function session(portal, id, pw) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, geolocation: GEO, permissions: ['geolocation'] });
+  await ctx.exposeBinding('__cspViolation', ({ page }, v) => cspIssues.push({ who: id ?? 'citizen', url: page.url(), ...v }));
+  await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => window.__cspViolation?.({ directive: e.violatedDirective, blocked: e.blockedURI, sample: e.sample })));
+  ctx.on('page', (pg) => {
+    pg.on('console', (m) => {
+      if (/Content Security Policy/i.test(m.text())) cspIssues.push({ who: id ?? 'citizen', url: pg.url(), console: m.text().slice(0, 200) });
+      else if (m.type() === 'error') otherConsole.push({ who: id ?? 'citizen', url: pg.url(), console: m.text().slice(0, 160) });
+    });
+    pg.on('pageerror', (e) => jsErrors.push({ who: id ?? 'citizen', url: pg.url(), error: String(e).slice(0, 200) }));
+  });
   if (id) { const r = await ctx.request.post(`${B}/api/auth/login`, { data: { portal, identifier: id, password: pw ?? creds[id] } }); if (r.status() !== 200) throw new Error(`login ${id} ${r.status()}`); }
   await ctx.addCookies([{ name: 'nu_lang', value: 'en', url: B }]); // after login, which applies the saved language
   return { ctx, page: await ctx.newPage() };
@@ -105,6 +116,28 @@ if (await row.count()) { await row.locator('td').nth(2).click(); await P.waitFor
 ok('open', 'officer: clicking anywhere on the row opens the detail page', P.url().endsWith(`/office/complaints/${code}`), P.url());
 const direct = await P.goto(`${B}/office/complaints/${code}`, { waitUntil: 'networkidle' });
 ok('open', 'direct complaint URL works', direct.status() === 200, direct.status());
+const cspHeader = direct.headers()['content-security-policy'] ?? '';
+ok('csp', 'detail page is served with the nonce CSP (no unsafe-inline scripts)', /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/.test(cspHeader) && !/script-src[^;]*unsafe-inline/.test(cspHeader), cspHeader.split(';')[1]?.trim());
+// Server-rendered script tags must carry the nonce; chunks Next loads later are trusted through 'strict-dynamic'
+const html = await direct.text();
+const tags = html.match(/<script\b[^>]*>/g) ?? [];
+const noNonce = tags.filter((x) => !/\bnonce="/.test(x));
+ok('csp', 'every server-rendered script tag carries this request\'s nonce', tags.length > 0 && noNonce.length === 0, `${tags.length} tags, ${noNonce.length} without nonce`);
+// Control (proves the detector works): inline <script> markup injected into the served HTML without the nonce,
+// as a stored-XSS payload would be, must be blocked by the real CSP header and reported
+const before = cspIssues.length;
+const cp0 = await eo.ctx.newPage();
+await cp0.route(`${B}/office/complaints/${code}`, async (rt) => {
+  const r0 = await rt.fetch();
+  await rt.fulfill({ response: r0, body: (await r0.text()).replace('</body>', '<script>window.__injected = 1</script></body>') });
+});
+await cp0.goto(`${B}/office/complaints/${code}`, { waitUntil: 'networkidle' });
+const injectedRan = await cp0.evaluate(() => window.__injected === 1);
+const stillWorks = await cp0.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /TAKE ACTION/.test(x.textContent)); return !!b && Object.keys(b).some((k) => k.startsWith('__react')); });
+ok('csp', 'control: injected inline script without the nonce is blocked and reported, page JS still runs', !injectedRan && cspIssues.length > before && stillWorks, `ran=${injectedRan}, violations +${cspIssues.length - before}, app hydrated=${stillWorks}`);
+await cp0.close();
+cspIssues.splice(before);
+ok('csp', 'React hydrated (client JavaScript is running)', await P.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /TAKE ACTION/.test(x.textContent)); return !!b && Object.keys(b).some((k) => k.startsWith('__react')); }), 'checked');
 const dt = await text(P);
 ok('detail', 'complaint number, original text, category, ward, date shown', dt.includes(code) && dt.includes('Street light near the bus stand') && /Street light/i.test(dt) && /Ward 10/i.test(dt), 'checked');
 ok('detail', 'citizen photo shown', (await P.locator('img[src^="/api/evidence/"]').count()) >= 1, await P.locator('img[src^="/api/evidence/"]').count());
@@ -236,6 +269,10 @@ if (opt.db) {
   ok('db', 'audit log entries', +au >= 8, au);
   stages.forEach((s) => { if (s.action !== '—') s.db = q(`SELECT to_status FROM complaint_action_log WHERE code='${s.action}'`); });
 }
+
+ok('csp', 'no CSP violations on any page in the whole flow', cspIssues.length === 0, cspIssues.length ? JSON.stringify(cspIssues.slice(0, 3)) : '0 violations');
+ok('csp', 'no uncaught JavaScript errors on any page in the whole flow', jsErrors.length === 0, jsErrors.length ? JSON.stringify(jsErrors.slice(0, 3)) : '0 errors');
+if (otherConsole.length) console.log('ℹ other console errors (not CSP):', JSON.stringify([...new Map(otherConsole.map((x) => [x.console, x])).values()].slice(0, 5)));
 
 await browser.close();
 const passed = res.filter((x) => x.pass).length;
