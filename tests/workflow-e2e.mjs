@@ -224,8 +224,8 @@ const internalOnly = [...evOffice].filter((e) => !evCitizen.has(e));
 const internalFetch = internalOnly.length ? await A.req(internalOnly[internalOnly.length - 1]) : { status: 'n/a' };
 ok('evidence', 'internal field evidence (inspection / verification) is not served to the citizen', internalOnly.length > 0 && internalFetch.status === 403, `${internalOnly.length} internal, ${internalFetch.status}`);
 ok('track', 'citizen tracking: responsible department, latest action, last updated, resolution', ['Responsible department', 'Latest action', 'Last updated', 'Resolution', 'Resolved'].every((x) => citS.includes(x)), 'checked');
-ok('track', 'citizen timeline shows Submitted → Received → Reviewed → Department → Assigned → Started → Progress → Completed → Under verification → Approved → Closed',
-  ['Complaint submitted', 'Complaint received', 'Complaint reviewed', 'Department assigned', 'Officer / staff assigned', 'Work started', 'Progress updates (1)', 'Work completed', 'Under verification', 'Approved after verification', 'Resolved / closed'].every((x) => citS.includes(x)), 'checked');
+ok('track', 'citizen timeline shows Submitted → Acknowledged → Department → Staff assigned → Action taken → Completed → Evidence → Under verification → Approved → Closed',
+  ['Complaint submitted', 'Acknowledged', 'Assigned to department', 'Staff assigned', 'Action taken', 'Work completed', 'Evidence submitted', 'Under verification', 'Approved after verification', 'Resolved / closed'].every((x) => citS.includes(x)), 'checked');
 ok('track', 'citizen page does not show internal notes', !citS.includes('temporarily off the job') && !citS.includes('Please organise the repair'), 'checked');
 expect('feedback', 'another citizen cannot rate this complaint', await B.req(`/api/complaints/${S}/feedback`, { body: { rating: 1 } }), 404);
 expect('feedback', 'citizen rates the closed complaint 5/5', await A.req(`/api/complaints/${S}/feedback`, { body: { rating: 5, comment: 'Fixed quickly, thank you' } }), 200);

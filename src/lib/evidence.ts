@@ -49,7 +49,7 @@ export async function validateFile(file: File) {
 
 export async function storeEvidence(
   complaintId: number,
-  kind: 'CITIZEN' | 'INSPECTION' | 'PROGRESS' | 'COMPLETION' | 'APPEAL' | 'ACTION' | 'BEFORE_WORK' | 'VERIFICATION',
+  kind: 'CITIZEN' | 'INSPECTION' | 'PROGRESS' | 'COMPLETION' | 'APPEAL' | 'ACTION' | 'BEFORE_WORK' | 'VERIFICATION' | 'AFTER' | 'ACTION_REFERENCE',
   file: File,
   uploadedBy: string,
   meta: EvidenceMeta = {},

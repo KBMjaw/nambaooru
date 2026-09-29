@@ -6,29 +6,37 @@ type At = string | Date | null | undefined;
 
 /**
  * Citizen tracking timeline built from the complaint's recorded events (not just its status):
- * Submitted → Acknowledged → Classified → Department assigned → Officer / staff assigned → Work started →
- * Progress updates → Work completed → Verification → Resolved / Closed. Public information only.
+ * Submitted → Acknowledged → Assigned to department → Staff assigned → Action taken → Work completed →
+ * Evidence submitted → Under verification → Approved / rework → Closed, each with its date/time and public description.
+ * Public information only: internal notes are never read here.
  */
 export function CitizenTimeline({ d, lang }: { d: ComplaintDetail; lang: Lang }) {
   const t = makeT(lang);
   const { c } = d;
   const status = c.status as string;
   const first = (...s: string[]) => d.history.find((h) => s.includes(h.to_status as string))?.created_at as At;
-  const workAssign = d.assignments.filter((a) => a.purpose === 'WORK' && ['PRIMARY', 'SUPERVISOR'].includes(a.assignee_role as string));
-  const progress = d.updates.filter((u) => u.update_type === 'PROGRESS');
+  // Public information only: public history notes, public action-log entries and citizen-visible evidence
+  const pub = d.history.filter((h) => h.public_note && h.note);
+  const pubNote = (...st: string[]) => [...pub].reverse().find((h) => st.includes(h.to_status as string) && h.from_status !== h.to_status)?.note as string | undefined;
+  const actions = pub.filter((h) => /^(Action taken|Progress \d+%):/.test(String(h.note)));
+  const afterEv = d.evidence.filter((e) => ['AFTER', 'COMPLETION', 'ACTION_REFERENCE'].includes(e.kind as string));
   const finished = ['CLOSED', 'REJECTED', 'DUPLICATE'].includes(status);
   const reworks = d.history.filter((h) => h.to_status === 'REWORK_REQUIRED' && h.from_status !== h.to_status);
+  const reworkReason = String([...pub].reverse().find((h) => String(h.note).startsWith('Rework required:'))?.note ?? '').replace(/^Rework required:\s*/, '');
+  const approvedAt = first('COMPLETION_VERIFIED');
+  const lastRework = reworks.at(-1)?.created_at as At;
   const steps: { key: string; label: string; at: At; note?: string }[] = [
-    { key: 'submitted', label: t('ct.submitted'), at: c.submitted_at as At },
-    { key: 'received', label: t('ct.received'), at: first('AI_CLASSIFIED') ?? first('INITIAL_REVIEW'), note: [c.category_en, c.sub_en, c.issue_en].filter(Boolean).join(' › ') },
-    { key: 'reviewed', label: t('ct.reviewed'), at: first('INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED') },
-    { key: 'dept', label: t('ct.department'), at: c.department_id ? (c.department_assigned_at as At) : null, note: (lang === 'ta' ? c.dept_ta ?? c.dept_en : c.dept_en) as string },
-    { key: 'assigned', label: t('ct.assigned'), at: first('ASSIGNED') ?? (workAssign.at(-1)?.created_at as At) },
-    { key: 'started', label: t('ct.started'), at: (c.work_started_at as At) ?? first('IN_PROGRESS') },
-    { key: 'progress', label: t('ct.progress', { n: progress.length }), at: progress[0]?.created_at as At, note: progress[0]?.progress_pct != null ? `${progress[0].progress_pct}%` : undefined },
-    { key: 'completed', label: t('ct.completed'), at: first('WORK_COMPLETED', 'VERIFICATION_PENDING') },
+    { key: 'submitted', label: t('ct.submitted'), at: c.submitted_at as At, note: [c.category_en, c.sub_en, c.issue_en].filter(Boolean).join(' › ') },
+    { key: 'acknowledged', label: t('ct.acknowledged'), at: first('INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED') },
+    { key: 'dept', label: t('ct.deptAssigned'), at: c.department_id ? ((c.department_assigned_at as At) ?? first('ASSIGNED')) : null, note: (lang === 'ta' ? c.dept_ta ?? c.dept_en : c.dept_en) as string },
+    { key: 'staff', label: t('ct.staffAssigned'), at: first('ASSIGNED') },
+    { key: 'action', label: actions.length > 1 ? `${t('ct.actionTaken')} (${actions.length})` : t('ct.actionTaken'), at: (actions[0]?.created_at as At) ?? (c.work_started_at as At) ?? first('IN_PROGRESS'),
+      note: actions.length ? String(actions.at(-1)!.note).replace(/^(Action taken|Progress \d+%):\s*/, '') : undefined },
+    { key: 'completed', label: t('ct.completed'), at: first('WORK_COMPLETED', 'VERIFICATION_PENDING'), note: pubNote('WORK_COMPLETED') },
+    { key: 'evidence', label: t('ct.evidence'), at: afterEv[0]?.created_at as At, note: afterEv.length ? t('ct.photos', { n: afterEv.length }) : undefined },
     { key: 'verifying', label: t('ct.underVerification'), at: first('VERIFICATION_PENDING'), note: reworks.length ? t('ct.reworkCount', { n: reworks.length }) : undefined },
-    { key: 'approved', label: t('ct.approved'), at: first('COMPLETION_VERIFIED') },
+    { key: 'decision', label: approvedAt ? t('ct.approved') : lastRework ? t('ct.reworkAsked') : t('ct.decision'), at: approvedAt ?? lastRework,
+      note: !approvedAt && lastRework ? reworkReason || t('ct.reworkGeneric') : undefined },
     { key: 'closed', label: finished && status !== 'CLOSED' ? `${t(`status.${status}` as MessageKey)}${c.resolution_type ? ` — ${t(`res.${c.resolution_type}` as MessageKey)}` : ''}` : t('ct.closed'),
       at: finished ? ((c.resolved_at as At) ?? (c.closed_at as At) ?? first(status)) : null,
       note: status === 'REJECTED' || status === 'DUPLICATE' ? (c.rejection_notes as string) ?? undefined : status === 'CLOSED' ? (c.resolution_notes as string) ?? undefined : undefined },
@@ -45,7 +53,7 @@ export function CitizenTimeline({ d, lang }: { d: ComplaintDetail; lang: Lang })
         const done = !!s.at || (i < last && !rejected);
         const skipped = !s.at && i < last && !rejected;
         const current = i === currentIdx;
-        const bad = rejected && s.key === 'closed';
+        const bad = (rejected && s.key === 'closed') || (s.key === 'decision' && !approvedAt && !!lastRework);
         return (
           <li key={s.key} className="relative flex gap-3 pb-4 last:pb-0">
             {i < steps.length - 1 && <span className={`absolute left-[13px] top-7 h-[calc(100%-1.25rem)] w-0.5 ${done ? 'bg-leaf-500' : 'bg-slate-200'}`} />}
@@ -55,7 +63,7 @@ export function CitizenTimeline({ d, lang }: { d: ComplaintDetail; lang: Lang })
             <div className="min-w-0 pt-0.5">
               <p className={`font-semibold ${bad ? 'text-red-700' : done || current ? 'text-slate-800' : 'text-slate-400'}`}>{s.label}{current && <span className="ml-2 badge bg-amber-100 text-amber-800">{t('ct.now')}</span>}</p>
               {s.at && <p className="text-xs text-slate-500">{fmtDateTime(s.at, lang)}</p>}
-              {skipped && s.key !== 'progress' && <p className="text-xs text-slate-400">—</p>}
+              {skipped && s.key !== 'action' && <p className="text-xs text-slate-400">—</p>}
               {s.note && (s.at || done) && <p className="text-xs text-slate-600">{s.note}</p>}
               {current && sideNote && <p className="text-xs font-bold text-amber-700">{sideNote}</p>}
             </div>

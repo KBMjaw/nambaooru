@@ -5,6 +5,7 @@ import { sql } from '@/lib/db';
 import type { ComplaintDetail } from '@/lib/complaint-detail';
 import type { TFn, MessageKey } from '@/i18n';
 import { ActionForm, type UserOpt, type ClassifyOpts } from './ActionForm';
+import type { RecordType } from './RecordAction';
 
 const WORK = ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'];
 const RESOLVABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
@@ -23,6 +24,7 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
   const status = c.status as string;
   const open = !FINAL.includes(status);
   const nodes: ReactNode[] = [];
+  const review: ReactNode[] = [];
   const k = (x: string) => `${code}-${x}`;
   const P = { code, portal, block: true } as const;
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
@@ -56,44 +58,26 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
 
   // ---- Field work (the assignee's own actions come first: that is their job) ----
   const fieldActor = !!myWork && has(u, 'complaint.work');
-  if (fieldActor) {
-    if (['ASSIGNED', 'REWORK_REQUIRED'].includes(status)) {
-      nodes.push(<ActionForm key={k('st')} {...P} action="start" label={t(status === 'REWORK_REQUIRED' ? 'wf.startRework' : 'field.start')} icon="▶️" tone="btn-primary" fields={['photo', 'gps', 'note']} hint={t('wf.beforePhotoHint')} />);
-      if (myWork!.status === 'PENDING') nodes.push(<ActionForm key={k('acc')} {...P} action="accept" label={t('field.accept')} icon="👍" />);
-    }
-    if (status === 'IN_PROGRESS') {
-      nodes.push(<ActionForm key={k('cp')} {...P} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gps', 'submitToggle']} hint={t('wf.completeHint')} />);
-      nodes.push(<ActionForm key={k('pr')} {...P} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['workDone', 'notes', 'visibility', 'progress', 'photo', 'gps']} defaults={{ visibility: 'PUBLIC' }} />);
-    }
-    if (['ASSIGNED', 'IN_PROGRESS'].includes(status))
-      nodes.push(<ActionForm key={k('ni')} {...P} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} />);
-    if (WORK.includes(status)) nodes.push(<ActionForm key={k('fn')} {...P} action="note" label={t('wf.addNote')} icon="📝" tone="btn-outline" fields={['visibility', 'notes', 'photo']} />);
-  }
+  // Start / accept / action taken / completion / notes / hold are recorded through "Record an action" (RecordAction)
+  if (fieldActor && ['ASSIGNED', 'IN_PROGRESS'].includes(status))
+    nodes.push(<ActionForm key={k('ni')} {...P} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} />);
   const onTeam = d.assignments.some((a) => a.assigned_to === u.id && ACTIVE.includes(a.status as string));
   if ((fieldActor || (has(u, 'evidence.upload') && u.scope !== 'ASSIGNED')) && ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'SITE_INSPECTION', 'VERIFIED'].includes(status))
     nodes.push(<ActionForm key={k('ue')} {...P} action="upload_evidence" label={t('wf.uploadEvidence')} icon="📷" tone="btn-outline" fields={['evidenceKind', 'photoRequired', 'gps', 'note']} defaults={{ evidenceKind: status === 'ASSIGNED' ? 'BEFORE_WORK' : 'PROGRESS' }} />);
   const canHold = fieldActor || has(u, 'complaint.reassign');
-  if (canHold && ['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(status))
-    nodes.push(<ActionForm key={k('hold')} {...P} action="hold" label={t('wf.hold')} icon="⏸️" tone="btn-outline" fields={['holdReason', 'note']} />);
   if (canHold && status === 'ON_HOLD')
     nodes.push(<ActionForm key={k('res')} {...P} action="resume" label={t('wf.resume')} icon="▶️" tone="btn-primary" fields={['note']} />);
   if (status === 'WORK_COMPLETED' && ((myDone && has(u, 'complaint.work')) || has(u, 'complaint.verify')))
     nodes.push(<ActionForm key={k('sv')} {...P} action="submit_verification" label={t('wf.submitForVerification')} icon="📨" tone="btn-primary" fields={['note']} />);
 
   // ---- Intake, classification, inspection ----
-  if (['AI_CLASSIFIED', 'REOPENED', 'SUBMITTED'].includes(status) && has(u, 'complaint.review'))
-    nodes.push(<ActionForm key={k('review')} {...P} action="review" label={t('wf.acknowledge')} icon="🧐" tone="btn-primary" fields={['note']} />);
   if (classify)
     nodes.push(<ActionForm key={k('cls')} {...P} action="classify" label={t('wf.classify')} icon="🏷️" tone="btn-outline" fields={['classify', 'note']} classify={classify}
       defaults={{ categoryId: String(c.category_id ?? ''), subcategoryId: String(c.subcategory_id ?? ''), issueTypeId: String(c.issue_type_id ?? ''), departmentId: String(c.department_id ?? '') }} />);
   if (open && has(u, 'complaint.review'))
     nodes.push(<ActionForm key={k('ri')} {...P} action="request_info" label={t('wf.requestInfo')} icon="❓" tone="btn-outline" fields={['noteRequired']} hint={t('wf.requestInfoHint')} />);
-  if (['INITIAL_REVIEW'].includes(status) && has(u, 'complaint.review') && !c.inspection_required)
-    nodes.push(<ActionForm key={k('vd')} {...P} action="verify_direct" label={t('office.verifyWithoutInspection')} icon="✔️" tone="btn-primary" fields={['note']} />);
   if (['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION'].includes(status) && has(u, 'complaint.schedule_inspection'))
     nodes.push(<ActionForm key={k('insp')} {...P} action="schedule_inspection" label={status === 'SITE_INSPECTION' ? `${t('office.reassign')} — ${t('office.inspector')}` : t('office.sendInspection')} icon="🔍" tone={status === 'INITIAL_REVIEW' && c.inspection_required ? 'btn-primary' : 'btn-outline'} fields={['inspector', 'dueAt', 'note']} users={inspectors} />);
-  if (status === 'SITE_INSPECTION' && has(u, 'complaint.inspect') && (u.scope !== 'ASSIGNED' || c.inspector_id === u.id))
-    nodes.push(<ActionForm key={k('rec')} {...P} action="inspect" label={t('office.recordInspection')} icon="📝" tone="btn-primary" fields={['outcome', 'notes', 'photoRequired', 'gpsRequired']} />);
 
   // ---- Assignment ----
   if (['VERIFIED', 'REOPENED'].includes(status) && has(u, 'complaint.assign'))
@@ -112,10 +96,7 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
 
   // ---- Verification & closure ----
   if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && has(u, 'complaint.verify') && pending && pending.completed_by !== u.id) {
-    const approveFields = noIssue || !has(u, 'complaint.close') ? ['method', 'notes'] as const : ['method', 'notes', 'closeToggle'] as const;
-    if (!noIssue || has(u, 'complaint.reject'))
-      nodes.push(<ActionForm key={k('vc')} {...P} action="verify_completion" label={t(noIssue ? 'wf.confirmNoIssue' : 'office.approveClose')} icon="🏁" tone="btn-primary" fields={[...approveFields]} extra={{ decision: 'approve' }} defaults={{ method: 'EVIDENCE' }} />);
-    nodes.push(<ActionForm key={k('sb')} {...P} action="verify_completion" label={t('wf.sendRework')} icon="↩️" tone="btn-outline" fields={['method', 'notes', 'publicReason']} extra={{ decision: 'send_back' }} defaults={{ method: 'EVIDENCE' }} />);
+    review.push(...reviewButtons(u, code, portal, noIssue, t));
     if (has(u, 'complaint.reject') && !noIssue) {
       nodes.push(<ActionForm key={k('vni')} {...P} action="verify_completion" label={t('wf.verifyNoIssue')} icon="🚫" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'no_issue' }} defaults={{ method: 'FIELD' }} />);
       nodes.push(<ActionForm key={k('vcv')} {...P} action="verify_completion" label={t('wf.verifyCannot')} icon="❔" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'cannot_verify' }} defaults={{ method: 'FIELD' }} />);
@@ -131,10 +112,39 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
   if (open && has(u, 'complaint.escalate') && (c.escalation_level as number) < 4)
     nodes.push(<ActionForm key={k('esc')} {...P} action="escalate" label={t('office.escalate')} icon="⬆️" tone="btn-outline" fields={['level', 'note']} />);
   // Field staff write notes through their own "Add note" (above); others use the action note
-  if ((has(u, 'complaint.remark') || onTeam) && !fieldActor)
-    nodes.push(<ActionForm key={k('rm')} {...P} action="remark" label={t('wf.actionNote')} icon="💬" tone="btn-outline" fields={['visibility', 'noteRequired']} />);
+
+  // ---- Action types offered in "Record an action" (planRecord in the action API maps and re-checks them) ----
+  const types: RecordType[] = [];
+  const pendingMine = fieldActor && myWork!.status === 'PENDING' && ['ASSIGNED', 'REWORK_REQUIRED'].includes(status);
+  const intake = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED'].includes(status);
+  if (pendingMine || (intake && has(u, 'complaint.review'))) types.push('ACKNOWLEDGE');
+  if (pendingMine || ((intake || status === 'INITIAL_REVIEW') && has(u, 'complaint.review') && !c.inspection_required) || (!open && has(u, 'complaint.reopen'))) types.push('ACCEPT');
+  if ((status === 'SITE_INSPECTION' && has(u, 'complaint.inspect') && (u.scope !== 'ASSIGNED' || c.inspector_id === u.id))
+    || ((intake || status === 'INITIAL_REVIEW') && has(u, 'complaint.inspect') && has(u, 'complaint.schedule_inspection'))) types.push('INSPECT');
+  if (fieldActor && ['ASSIGNED', 'REWORK_REQUIRED', 'IN_PROGRESS'].includes(status)) {
+    types.push('ACTION_TAKEN');
+    if (status !== 'IN_PROGRESS') types.push('WORK_STARTED');
+    types.push('WORK_COMPLETED');
+  }
+  if (canHold && ['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(status)) types.push('ON_HOLD');
+  if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && has(u, 'complaint.verify') && pending && pending.completed_by !== u.id) types.push('REWORK_REQUIRED');
+  if (open && (has(u, 'complaint.remark') || onTeam)) types.push('OTHER');
+  const photoTypes: RecordType[] = fieldActor ? ['WORK_STARTED', 'OTHER', 'REWORK_REQUIRED'] : ['REWORK_REQUIRED'];
 
   const nextKey = (status === 'VERIFICATION_PENDING' && noIssue ? 'next.NO_ISSUE' : `next.${status}`) as MessageKey;
   const holdText = status === 'ON_HOLD' && c.on_hold_reason ? ` — ${t(`hold.${c.on_hold_reason}` as MessageKey)}${c.on_hold_note ? `: ${c.on_hold_note}` : ''}` : '';
-  return { nodes, nextStep: `${t(nextKey)}${holdText}` };
+  return { nodes, review, record: { types, photoTypes }, nextStep: `${t(nextKey)}${holdText}` };
+}
+
+/** APPROVE & CLOSE (or APPROVE when this reviewer cannot close) and REJECT / REWORK for completed work. */
+export function reviewButtons(u: AuthUser, code: string, portal: 'OFFICE' | 'ADMIN', noIssue: boolean, t: TFn): ReactNode[] {
+  const P = { code, portal, block: true } as const;
+  const out: ReactNode[] = [];
+  const canClose = has(u, 'complaint.close') && !noIssue;
+  if (!noIssue || has(u, 'complaint.reject'))
+    out.push(<ActionForm key="rv-approve" {...P} action="verify_completion" label={noIssue ? t('wf.confirmNoIssue') : t(canClose ? 'rv.approveClose' : 'rv.approve')} icon="✅" tone="btn-primary"
+      fields={canClose ? ['notesRequired'] : ['method', 'notes']} notesLabel={t(canClose ? 'rv.closeNote' : 'rv.approveNote')} extra={canClose ? { decision: 'approve', close: true, method: 'EVIDENCE' } : { decision: 'approve' }} defaults={{ method: 'EVIDENCE' }} />);
+  out.push(<ActionForm key="rv-rework" {...P} action="verify_completion" label={t('rv.rework')} icon="↩️" tone="btn-danger" fields={['notesRequired', 'publicReason']} notesLabel={t('rv.reworkReason')}
+    extra={{ decision: 'send_back', method: 'EVIDENCE' }} hint={t('ra.hint.REWORK_REQUIRED')} />);
+  return out;
 }

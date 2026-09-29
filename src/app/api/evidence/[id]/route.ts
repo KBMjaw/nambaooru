@@ -4,7 +4,7 @@ import { getUser } from '@/lib/auth';
 import { complaintScope } from '@/lib/scope';
 import { forbidden, notFound, unauthorized } from '@/lib/errors';
 
-const CITIZEN_KINDS = ['CITIZEN', 'COMPLETION', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'];
+const CITIZEN_KINDS = ['CITIZEN', 'COMPLETION', 'AFTER', 'ACTION_REFERENCE', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'];
 const SAFE_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 
 /** Evidence is never public: served only to the complaint owner or to officials whose jurisdiction covers the complaint. */

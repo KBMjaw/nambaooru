@@ -1,7 +1,7 @@
 // UI-driven check of the critical complaint flow, clicking through the real pages as each role:
 // list → click row → detail → citizen submission → TAKE ACTION → acknowledge → classify → inspection → supervisor →
-// supervisor assigns field staff → (phone) open work → start → public + internal notes → upload evidence → progress →
-// mark completed with photo → verifier sends back (rework) → redo → verifier approves → EO closes → citizen tracking.
+// supervisor assigns field staff → (phone) open work → Record action: work started → public + internal notes → upload evidence →
+// action taken → work completed with after photo → verifier REJECT / REWORK → redo → APPROVE & CLOSE → citizen tracking.
 // Also: Not Accepted complaint (reason / who / when, Accept), unauthorized page access, no horizontal scroll on the phone.
 // Creates tagged test records (UI-<ts>); the complaints end closed / reopened-and-closed.
 //
@@ -42,6 +42,21 @@ async function act(p, label, fill = async () => {}) {
   await form.getByRole('button', { name: /^Confirm$/ }).click();
   await p.waitForTimeout(1800);
   const err = await form.locator('[role=alert], .alert-error, .bg-red-50').first().textContent().catch(() => null);
+  await p.reload(); await p.waitForLoadState('networkidle');
+  return err;
+}
+/** "Record an action" in TAKE ACTION: action type + description (+ photos). Returns the error shown, if any. */
+async function rec(p, type, description, photos = [], extra = async () => {}) {
+  const ta = p.getByRole('button', { name: /TAKE ACTION/ });
+  if (await ta.count() && (await ta.getAttribute('aria-expanded')) !== 'true') await ta.click();
+  const form = p.getByTestId('record-action');
+  await form.locator('select[name=actionType]').selectOption(type);
+  await form.locator('textarea[name=description]').fill(description);
+  await extra(form);
+  if (photos.length) { await form.getByTestId('record-photo').setInputFiles(photos); await p.waitForTimeout(1500); }
+  await form.getByRole('button', { name: /Save action/ }).click();
+  await p.waitForTimeout(1800);
+  const err = await form.locator('.bg-red-50').first().textContent({ timeout: 500 }).catch(() => null);
   await p.reload(); await p.waitForLoadState('networkidle');
   return err;
 }
@@ -93,11 +108,11 @@ ok('detail', 'citizen submission: description, category, location, submitted tim
 ok('detail', 'TAKE ACTION and next step shown', /TAKE ACTION/i.test(t) && /Next step/i.test(t), 'checked');
 ok('detail', 'direct URL navigation works', (await eo.ctx.request.get(`${B}/office/complaints/${S}`)).status() === 200, 'checked');
 
-let e = await act(eo.page, 'Acknowledge / accept');
+let e = await rec(eo.page, 'ACKNOWLEDGE', 'Checked and acknowledged');
 ok('acknowledge', 'EO acknowledges → status Acknowledged', !e && (await text(eo.page)).includes('Acknowledged'), e ?? 'ok');
 e = await act(eo.page, 'Classify / route department', async (f) => { await pick(f, 'Pole'); await pick(f, 'Electric pole damaged'); });
 ok('classify', 'EO classifies Electrical › Pole › Pole damaged', !e && (await text(eo.page)).includes('Electric pole damaged'), e ?? 'ok');
-e = await act(eo.page, 'Add action note', async (f) => { await f.locator('textarea').fill(`${TAG} internal: check pole stock before sending staff`); });
+e = await rec(eo.page, 'OTHER', `${TAG} internal: check pole stock before sending staff`);
 ok('notes', 'EO adds an INTERNAL action note', !e && (await text(eo.page)).includes('check pole stock'), e ?? 'ok');
 e = await act(eo.page, 'Send for site inspection', async (f) => { await pick(f, 'Ravi'); });
 ok('inspection', 'EO sends for site inspection (Ravi)', !e, e ?? 'ok');
@@ -136,55 +151,47 @@ await ravi.page.waitForURL(new RegExp(S)); await ravi.page.waitForLoadState('net
 t = await text(ravi.page);
 ok('mobile', 'field staff opens the complaint and sees the citizen submission', t.includes('Citizen submission') && t.includes(SNIP), 'checked');
 ok('mobile', 'detail page: no horizontal scroll on the phone', (await overflow(ravi.page)) <= 1, await overflow(ravi.page));
-e = await act(ravi.page, '^▶️ Start$|Start$', async (f) => { await f.locator('input[type=file]').setInputFiles(photo(2)); await ravi.page.waitForTimeout(1200); });
+e = await rec(ravi.page, 'WORK_STARTED', 'Started work: faulty fitting being removed', [photo(2)]);
 ok('work', 'START WORK (with before photo) → Work in Progress', !e && (await text(ravi.page)).includes('Work in Progress'), e ?? 'ok');
-e = await act(ravi.page, 'Add note', async (f) => { await f.getByText('Public progress update').click(); await f.locator('textarea').fill(`${TAG} public: old fitting removed, new LED fitting being installed`); });
+e = await rec(ravi.page, 'OTHER', `${TAG} public: old fitting removed, new LED fitting being installed`, [], async (f) => { await f.getByText('Public progress update').click(); });
 ok('notes', 'field staff adds a PUBLIC progress update', !e, e ?? 'ok');
 e = await act(ravi.page, 'Upload evidence', async (f) => { await f.locator('input[type=file]').setInputFiles([photo(3), photo(4)]); await ravi.page.waitForTimeout(1500); });
 ok('evidence', 'field staff uploads 2 work photos', !e, e ?? 'ok');
-e = await act(ravi.page, 'Add action / progress', async (f) => { await f.locator('textarea').first().fill('Inspected the damaged light; removed the faulty fitting and installed a replacement'); await f.locator('input[type=file]').setInputFiles(photo(5)); await ravi.page.waitForTimeout(1200); });
-ok('work', 'progress update with photo', !e, e ?? 'ok');
+e = await rec(ravi.page, 'ACTION_TAKEN', 'Inspected the damaged light; removed the faulty fitting and installed a replacement', [photo(5)]);
+ok('work', 'Action taken with reference photo', !e, e ?? 'ok');
 // Completion without the reference photo must be refused
-await ravi.page.getByRole('button', { name: /TAKE ACTION/ }).click().catch(() => {});
-await ravi.page.getByRole('button', { name: /Mark work completed/ }).first().click();
-let cf = ravi.page.locator('div.rounded-xl').filter({ has: ravi.page.locator('p.font-bold', { hasText: /Mark work completed/ }) }).last();
-await cf.locator('textarea').first().fill('Street light fitting replaced and tested successfully');
-await cf.getByRole('button', { name: /^Confirm$/ }).click(); await ravi.page.waitForTimeout(800);
-ok('complete', 'completion without the after-work photo is refused', (await cf.innerText()).match(/photo/i) && (await text(ravi.page)).includes('Work in Progress'), 'checked');
-await cf.locator('input[type=file]').setInputFiles(photo(6)); await ravi.page.waitForTimeout(1500);
-await ravi.page.screenshot({ path: `critical-m-complete-${TAG}.png` });
-await cf.getByRole('button', { name: /^Confirm$/ }).click(); await ravi.page.waitForTimeout(2000); await ravi.page.reload();
-ok('complete', 'MARK WORK COMPLETED with note + reference photo → Verification Pending (not closed)', (await text(ravi.page)).includes('Verification Pending'), 'checked');
+e = await rec(ravi.page, 'WORK_COMPLETED', 'Street light fitting replaced and tested successfully');
+ok('complete', 'completion without the after-work photo is refused', /photo/i.test(e ?? '') && (await text(ravi.page)).includes('Work in Progress'), e);
+e = await rec(ravi.page, 'WORK_COMPLETED', 'Street light fitting replaced and tested successfully', [photo(6)]);
+ok('complete', 'WORK COMPLETED with description + after photo → Verification Pending (not closed)', !e && (await text(ravi.page)).includes('Verification Pending'), e ?? 'ok');
 
 // ---------------------------------------------------------------- verifier: rework, then approve
 await sup.page.reload(); await sup.page.waitForLoadState('networkidle');
 t = await text(sup.page);
-ok('verify', 'verifier sees citizen evidence + before/progress/completion photos + notes', t.includes('Before work') && t.includes('Completion evidence') && t.includes('Street light fitting replaced') && (await sup.page.locator('img[src^="/api/evidence/"]').count()) >= 6, 'checked');
-e = await act(sup.page, 'Reject — rework', async (f) => { await f.locator('textarea').first().fill('Lamp cover missing — please fix'); await f.locator('textarea').nth(1).fill('The lamp cover still has to be fitted.'); });
+ok('verify', 'verifier sees citizen evidence + before/progress/completion photos + notes', t.includes('Before work') && t.includes('After (work completed)') && t.includes('Street light fitting replaced') && (await sup.page.locator('img[src^="/api/evidence/"]').count()) >= 6, 'checked');
+e = await act(sup.page, 'REJECT / REWORK', async (f) => { await f.locator('textarea').first().fill('Lamp cover missing — please fix'); await f.locator('textarea').nth(1).fill('The lamp cover still has to be fitted.'); });
 ok('rework', 'verifier rejects with a reason → Rework Required', !e && (await text(sup.page)).includes('Rework Required'), e ?? 'ok');
 await ravi.page.goto(`${B}/office/notifications`, { waitUntil: 'networkidle' });
 ok('rework', 'field staff notified: Rework required', (await text(ravi.page)).includes('Rework required'), 'checked');
 await ravi.page.goto(`${B}/office/complaints/${S}`, { waitUntil: 'networkidle' });
-e = await act(ravi.page, 'Start rework');
+e = await rec(ravi.page, 'WORK_STARTED', 'Rework started: fitting the lamp cover');
 ok('rework', 'field staff restarts → Work in Progress', !e && (await text(ravi.page)).includes('Work in Progress'), e ?? 'ok');
-e = await act(ravi.page, 'Mark work completed', async (f) => { await f.locator('textarea').first().fill('Lamp cover fitted, tested at dusk'); await f.locator('input[type=file]').setInputFiles(photo(7)); await ravi.page.waitForTimeout(1500); });
+e = await rec(ravi.page, 'WORK_COMPLETED', 'Lamp cover fitted, tested at dusk', [photo(7)]);
 ok('rework', 'new completion evidence → Verification Pending', !e && (await text(ravi.page)).includes('Verification Pending'), e ?? 'ok');
 await sup.page.reload();
-e = await act(sup.page, 'Approve & close', async (f) => { await f.locator('textarea').first().fill('Photos confirm the fix'); const cb = f.locator('input[type=checkbox]'); if (await cb.count() && await cb.isChecked()) await cb.uncheck(); });
-ok('verify', 'verifier approves (evidence review) → Resolution Verified', !e && (await text(sup.page)).includes('Resolution Verified'), e ?? 'ok');
+e = await act(sup.page, 'APPROVE & CLOSE', async (f) => { await f.locator('textarea').first().fill('Street light repaired; photos confirm the fix. Closing.'); });
+ok('verify', 'verifier APPROVE & CLOSE (closure note) → Closed', !e && (await text(sup.page)).includes('Closed'), e ?? 'ok');
 await eo.page.reload();
-e = await act(eo.page, '🔒 Close|^Close$', async (f) => { await f.locator('textarea').first().fill('Street light repaired and verified. Closing.'); });
-ok('close', 'EO closes with a closure note → Closed', !e && (await text(eo.page)).includes('Closed'), e ?? 'ok');
 t = await text(eo.page);
-ok('timeline', 'officer timeline lists every step with actor and visibility', ['Acknowledged', 'Verification Pending', 'Rework Required', 'Closed', 'Internal', 'Public', 'Before work', 'Completion evidence'].every((x) => t.includes(x)), 'checked');
+ok('timeline', 'officer timeline lists every step with actor and visibility', ['Acknowledged', 'Verification Pending', 'Rework Required', 'Closed', 'Internal', 'Public', 'Before work', 'After (work completed)'].every((x) => t.includes(x)), 'checked');
 
 // ---------------------------------------------------------------- citizen tracking
 await cit.page.goto(`${B}/complaints/${S}`, { waitUntil: 'networkidle' });
 t = await text(cit.page);
 ok('citizen', 'citizen sees Closed with the full timeline and resolution', t.includes('Resolved / closed') && t.includes('Resolved') && t.includes('Work completed'), 'checked');
 ok('citizen', 'citizen sees the PUBLIC progress update and the public work performed', t.includes('new LED fitting being installed') && t.includes('installed a replacement'), 'checked');
-ok('citizen', 'citizen timeline: Submitted → Received → Reviewed → Department → Assigned → Started → Progress → Completed → Under verification → Approved → Closed',
-  ['Complaint submitted', 'Complaint received', 'Complaint reviewed', 'Department assigned', 'Officer / staff assigned', 'Work started', 'Progress updates', 'Work completed', 'Under verification', 'Approved after verification', 'Resolved / closed'].every((x) => t.includes(x)), 'checked');
+ok('citizen', 'citizen timeline: Submitted → Acknowledged → Department → Staff assigned → Action taken → Completed → Evidence → Under verification → Approved → Closed',
+  ['Complaint submitted', 'Acknowledged', 'Assigned to department', 'Staff assigned', 'Action taken', 'Work completed', 'Evidence submitted', 'Under verification', 'Approved after verification', 'Resolved / closed'].every((x) => t.includes(x)), 'checked');
 ok('citizen', 'citizen told about the rework with the public reason', t.includes('Rework requested 1 time') && t.includes('lamp cover still has to be fitted'), 'checked');
 const cn = await (await cit.ctx.request.get(`${B}/api/notifications?portal=PUBLIC`)).json();
 const titles = cn.items.filter((n) => n.code === S).map((n) => n.title_en);

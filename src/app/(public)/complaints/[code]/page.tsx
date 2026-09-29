@@ -77,7 +77,7 @@ export default async function CitizenComplaint({ params }: { params: Promise<{ c
   const overdue = c.sla_due_at && new Date(c.sla_due_at as string) < new Date() && !['CLOSED', 'REJECTED', 'DUPLICATE'].includes(c.status as string);
   const publicHistory = d.history.filter((h) => h.public_note && h.note);
   // Citizens see their own evidence and the completion photos; internal field / verification evidence stays internal
-  const evidence = d.evidence.filter((e) => ['CITIZEN', 'COMPLETION', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'].includes(e.kind as string));
+  const evidence = d.evidence.filter((e) => ['CITIZEN', 'COMPLETION', 'AFTER', 'ACTION_REFERENCE', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'].includes(e.kind as string));
   const latest = [...d.history].reverse().find((h) => h.public_note);
   const finished = ['CLOSED', 'REJECTED', 'DUPLICATE'].includes(c.status as string);
 

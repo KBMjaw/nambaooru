@@ -1,4 +1,4 @@
-import { makeT, type Lang } from '@/i18n';
+import { makeT, type Lang, type MessageKey } from '@/i18n';
 import { fmtDateTime } from '@/lib/format';
 
 export interface EvidenceItem {
@@ -7,6 +7,7 @@ export interface EvidenceItem {
 }
 
 function Media({ e, lang }: { e: EvidenceItem; lang: Lang }) {
+  const t = makeT(lang);
   const src = `/api/evidence/${e.id}`;
   return (
     <figure className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
@@ -19,25 +20,26 @@ function Media({ e, lang }: { e: EvidenceItem; lang: Lang }) {
         <div>🕒 {fmtDateTime(e.captured_at ?? e.created_at, lang)} {e.capture_source === 'CAMERA' ? '· 📷' : ''}</div>
         {e.latitude != null && <div>📍 {e.latitude.toFixed(5)}, {e.longitude?.toFixed(5)}{e.gps_accuracy_m ? ` ±${Math.round(e.gps_accuracy_m)}m` : ''}</div>}
         {e.uploaded_by_name && <div>👤 {e.uploaded_by_name}</div>}
+        {e.kind !== 'CITIZEN' && <div className="font-semibold text-slate-600">{t(`evk.${e.kind}` as MessageKey)}</div>}
       </figcaption>
     </figure>
   );
 }
 
-/** Before (citizen) vs After (official completion) evidence, side by side. */
+/** BEFORE (citizen's original evidence) vs AFTER (staff action / completion evidence), side by side. Citizen evidence is never replaced. */
 export function BeforeAfter({ evidence, lang }: { evidence: EvidenceItem[]; lang: Lang }) {
   const t = makeT(lang);
   const before = evidence.filter((e) => e.kind === 'CITIZEN');
-  const after = evidence.filter((e) => e.kind === 'COMPLETION');
+  const after = evidence.filter((e) => ['AFTER', 'COMPLETION', 'ACTION_REFERENCE'].includes(e.kind));
   if (!before.length && !after.length) return <p className="text-sm text-slate-500">{t('complaint.noEvidence')}</p>;
   return (
     <div className="grid grid-cols-2 gap-3">
       <div>
-        <p className="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-red-700">⬅ {t('complaint.before')}</p>
+        <p className="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-red-700">⬅ {t('ev.before')}</p>
         <div className="space-y-2">{before.length ? before.map((e) => <Media key={e.id} e={e} lang={lang} />) : <p className="text-center text-xs text-slate-400">—</p>}</div>
       </div>
       <div>
-        <p className="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-leaf-700">{t('complaint.after')} ➡</p>
+        <p className="mb-1.5 text-center text-xs font-bold uppercase tracking-wide text-leaf-700">{t('ev.after')} ➡</p>
         <div className="space-y-2">{after.length ? after.map((e) => <Media key={e.id} e={e} lang={lang} />) : <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-400">{t('complaint.pending')}</p>}</div>
       </div>
     </div>

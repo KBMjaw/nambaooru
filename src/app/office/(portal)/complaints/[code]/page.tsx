@@ -18,6 +18,8 @@ import { TakeAction } from '@/components/office/TakeAction';
 import { complaintActions } from '@/components/office/complaintActions';
 import { WorkflowSections } from '@/components/office/WorkflowSections';
 import { OfficeTimeline } from '@/components/office/OfficeTimeline';
+import { RecordAction } from '@/components/office/RecordAction';
+import { ActionHistory, ReviewPanel } from '@/components/office/ActionHistory';
 import { CitizenSubmission } from '@/components/office/CitizenSubmission';
 import { ComplaintMiniMap } from '@/components/office/ComplaintMiniMap';
 import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
@@ -50,7 +52,7 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
   const pendingAppeals = d.appeals.filter((a) => a.status === 'PENDING');
 
   // ---- Actions permitted for THIS user at THIS stage (the API re-checks everything) ----
-  const { nodes: actions, nextStep } = await complaintActions(u, d, work, t, lang, 'OFFICE');
+  const { nodes: actions, review, record, nextStep } = await complaintActions(u, d, work, t, lang, 'OFFICE');
   const appealNodes = pendingAppeals.length > 0 && has(u, 'appeal.review') ? pendingAppeals.map((ap) => (
     <div key={`ap${ap.id}`} className="space-y-2 rounded-xl border border-navy-100 bg-navy-50 p-3 text-sm md:col-span-2">
       <p className="font-bold">🔁 {t('appeal.pending')}</p>
@@ -114,7 +116,11 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
         )}
       </div>
 
-      <TakeAction nextStep={nextStep} count={actions.length + appealNodes.length} startOpen={appealNodes.length > 0}>{[...appealNodes, ...actions]}</TakeAction>
+      <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length + appealNodes.length} startOpen={appealNodes.length > 0}>
+        {[...(record.types.length ? [<RecordAction key="record" code={code} types={record.types} photoTypes={record.photoTypes} />] : []), ...review, ...appealNodes, ...actions]}
+      </TakeAction>
+
+      <ReviewPanel d={d} lang={lang} buttons={review} />
 
       <WorkflowSections d={d} lang={lang} />
 
@@ -124,7 +130,7 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
 
           <Section title={`🛠️ ${t('wf.workEvidence')}`}>
             <BeforeAfter evidence={d.evidence as never} lang={lang} />
-            {(['BEFORE_WORK', 'PROGRESS', 'COMPLETION', 'INSPECTION', 'VERIFICATION', 'APPEAL'] as const).filter((kind) => d.evidence.some((e) => e.kind === kind)).map((kind) => (
+            {(['BEFORE_WORK', 'PROGRESS', 'ACTION_REFERENCE', 'AFTER', 'COMPLETION', 'INSPECTION', 'VERIFICATION', 'APPEAL'] as const).filter((kind) => d.evidence.some((e) => e.kind === kind)).map((kind) => (
               <div key={kind} className="mt-4">
                 <p className="mb-2 text-sm font-bold text-slate-600">{t(`evk.${kind}` as MessageKey)} ({d.evidence.filter((e) => e.kind === kind).length})</p>
                 <EvidenceGrid evidence={d.evidence.filter((e) => e.kind === kind) as never} lang={lang} />
@@ -141,6 +147,10 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
 
           <Section title={`🛠️ ${t('actions.title')} (${work.actions.length})`}>
             <ActionsPanel code={code} portal="OFFICE" actions={work.actions as ActionRow[]} staff={work.staffWithSelf} departments={work.departments} perms={work.perms} meId={u.id} open={open} />
+          </Section>
+
+          <Section title={`📋 ${t('ra.history')} (${d.actionLog.length})`}>
+            <ActionHistory rows={d.actionLog} lang={lang} />
           </Section>
 
           <Section title={`🧾 ${t('wf.fullTimeline')}`}>

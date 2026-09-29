@@ -14,6 +14,8 @@ import { TakeAction } from '@/components/office/TakeAction';
 import { complaintActions } from '@/components/office/complaintActions';
 import { WorkflowSections } from '@/components/office/WorkflowSections';
 import { CitizenSubmission } from '@/components/office/CitizenSubmission';
+import { RecordAction } from '@/components/office/RecordAction';
+import { ActionHistory, ReviewPanel } from '@/components/office/ActionHistory';
 import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
 
 /**
@@ -34,7 +36,7 @@ export default async function AdminComplaint({ params }: { params: Promise<{ cod
   const work = await complaintWorkData(u, c);
   const audits = await sql`SELECT a.action, a.created_at, a.actor_role, a.reason, x.full_name FROM audit_logs a LEFT JOIN users x ON x.id = a.actor_id
                            WHERE a.entity_type = 'complaint' AND a.entity_id = ${code} ORDER BY a.created_at DESC LIMIT 100`;
-  const { nodes: actions, nextStep } = await complaintActions(u, d, work, t, lang, 'ADMIN');
+  const { nodes: actions, review, record, nextStep } = await complaintActions(u, d, work, t, lang, 'ADMIN');
 
   return (
     <div className="space-y-4">
@@ -47,8 +49,12 @@ export default async function AdminComplaint({ params }: { params: Promise<{ cod
         {(c.escalation_level as number) > 0 && <p className="mt-1 text-sm font-semibold text-amber-800">⬆️ {t('wf.escLevel', { n: c.escalation_level as number })}{c.escalation_note ? ` — ${c.escalation_note}` : ''}</p>}
         <p className="mt-1 text-sm">👤 <Link className="font-semibold text-navy-700 underline" href={`/admin/citizens/${c.citizen_id}`}>{c.citizen_name as string}</Link>{c.assigned_name ? <> · 👷 {c.assigned_name as string}</> : null}</p>
       </div>
-      <TakeAction nextStep={nextStep} count={actions.length}>{actions}</TakeAction>
+      <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length}>
+        {[...(record.types.length ? [<RecordAction key="record" code={code} portal="ADMIN" types={record.types} photoTypes={record.photoTypes} />] : []), ...review, ...actions]}
+      </TakeAction>
+      <ReviewPanel d={d} lang={lang} buttons={review} />
       <CitizenSubmission d={d} lang={lang} showContact={has(u, 'citizen.pii.view')} />
+      <Section title={`📋 ${t('ra.history')} (${d.actionLog.length})`}><ActionHistory rows={d.actionLog} lang={lang} /></Section>
       <p className="-mt-2 text-[11px] text-slate-400">{t('admin.adminComplaintNote')}</p>
       <WorkflowSections d={d} lang={lang} />
       <div className="grid gap-4 lg:grid-cols-3">

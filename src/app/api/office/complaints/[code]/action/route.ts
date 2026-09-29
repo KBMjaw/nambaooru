@@ -54,8 +54,37 @@ export const POST = route<Ctx>(async (req, { params }) => {
   } else {
     data = await req.json().catch(() => ({}));
   }
-  const photo: File | null = photos[0] ?? null;
   const action = z.string().parse(data.action);
+
+  const [c0] = await sql`SELECT c.id, c.status FROM complaints c WHERE c.code = ${code} AND (${complaintScope(u)})`;
+  if (!c0) throw notFound('Complaint not found in your jurisdiction');
+  const run: Run = { u, code, stored: [] };
+  let entry: LogEntry;
+  if (action === 'record') {
+    // "Record action": one form with an action type and a description, mapped onto the workflow steps below
+    const plan = await planRecord(u, c0 as { id: number; status: string }, data, photos);
+    for (const s of plan.steps) await perform(run, s.action, s.data, s.photos ? photos : []);
+    entry = plan;
+  } else {
+    await perform(run, action, data, photos);
+    entry = describeLegacy(action, data);
+  }
+
+  // Every action is kept in the append-only action log with its code, actor, status change and evidence
+  const [after] = await sql`SELECT status FROM complaints WHERE id = ${c0.id}`;
+  const [log] = await sql`INSERT INTO complaint_action_log (complaint_id, action_type, description, visibility, actor_id, actor_role, from_status, to_status)
+                          VALUES (${c0.id}, ${entry.logType}, ${entry.description}, ${entry.visibility}, ${u.id}, ${u.role}, ${c0.status}, ${after.status}) RETURNING id, code`;
+  if (run.stored.length) await sql`UPDATE complaint_evidence SET workflow_action_id = ${log.id} WHERE id IN ${sql(run.stored)}`;
+  return { ok: true, actionCode: log.code as string, status: after.status as string, evidenceIds: run.stored };
+});
+
+interface Run { u: AuthUser; code: string; stored: number[] }
+interface LogEntry { logType: string; description: string | null; visibility: 'PUBLIC' | 'INTERNAL' }
+
+/** Runs one workflow action; every check (permission, scope, status, identity) happens here on the server. */
+async function perform(run: Run, action: string, data: Record<string, unknown>, photos: File[]) {
+  const { u, code } = run;
+  const photo: File | null = photos[0] ?? null;
 
   const [c] = await sql`SELECT c.*, cat.inspection_required, cat.name_en AS cat_en, cat.name_ta AS cat_ta
                         FROM complaints c LEFT JOIN complaint_categories cat ON cat.id = c.category_id
@@ -71,6 +100,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const storeAll = async (kind: Parameters<typeof storeEvidence>[1]) => {
     const ids: number[] = [];
     for (const f of photos) ids.push(await storeEvidence(id, kind, f, u.id, { ...geo, capturedAt: new Date().toISOString(), source: 'CAMERA' }) as number);
+    run.stored.push(...ids);
     if (ids.length) await audit(u, { action: 'EVIDENCE_UPLOADED', entityType: 'complaint', entityId: code, newValue: { kind, evidenceIds: ids } });
     return ids;
   };
@@ -111,6 +141,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       if (geo.latitude == null || geo.longitude == null) throw badRequest('field.needLocation');
       if (!photo) throw badRequest('Inspection photo is required');
       const evidenceId = await storeEvidence(id, 'INSPECTION', photo, u.id, { ...geo, capturedAt: new Date().toISOString(), source: 'CAMERA' });
+      run.stored.push(evidenceId);
       await sql`INSERT INTO inspections (complaint_id, inspector_id, outcome, notes, latitude, longitude, gps_accuracy_m, evidence_id)
                 VALUES (${id}, ${u.id}, ${outcome}, ${notes}, ${geo.latitude}, ${geo.longitude}, ${geo.accuracy}, ${evidenceId})`;
       await sql`UPDATE assignments SET status = 'COMPLETED', completed_at = now() WHERE complaint_id = ${id} AND purpose = 'INSPECTION' AND status IN ('PENDING','ACCEPTED','IN_PROGRESS')`;
@@ -355,7 +386,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
                   WHERE complaint_id = ${id} AND purpose = 'WORK' AND assignee_role IN ('PRIMARY','SUPPORT') AND status IN ('PENDING','ACCEPTED')`;
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, evidence_id, latitude, longitude)
                   VALUES (${id}, ${a.id}, ${u.id}, 'STARTED', ${str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : null)}, ${before[0] ?? null}, ${geo.latitude}, ${geo.longitude})`;
-        await transition(id, 'IN_PROGRESS', u, { note: str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : 'Work started'), publicNote: !str(data.note) && status !== 'REWORK_REQUIRED', auditAction: 'WORK_STARTED' });
+        await transition(id, 'IN_PROGRESS', u, { note: str(data.note) ?? (status === 'REWORK_REQUIRED' ? 'Rework started' : 'Work started'), publicNote: data.visibility === 'PUBLIC' || (!str(data.note) && status !== 'REWORK_REQUIRED'), auditAction: 'WORK_STARTED' });
       } else if (action === 'progress') {
         requireStatus('IN_PROGRESS');
         // "Add action / progress": what was done (required), extra notes, photos, GPS; public or internal
@@ -364,10 +395,13 @@ export const POST = route<Ctx>(async (req, { params }) => {
         const visibility = z.enum(['INTERNAL', 'PUBLIC']).parse(data.visibility ?? 'PUBLIC');
         const notes = extra ? `${workDone}\nNotes: ${extra}` : workDone;
         const pct = z.coerce.number().int().min(0).max(100).parse(data.progress ?? 50);
-        const ids = await storeAll('PROGRESS');
+        // "Action taken" photos are the reference evidence for this action; plain progress photos otherwise
+        const kind = z.enum(['PROGRESS', 'ACTION_REFERENCE']).parse(data.evidenceKind ?? 'PROGRESS');
+        if (kind === 'ACTION_REFERENCE' && !photos.length) throw badRequest('An action / reference photo is required');
+        const ids = await storeAll(kind);
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, progress_pct, evidence_id, latitude, longitude)
                   VALUES (${id}, ${a.id}, ${u.id}, 'PROGRESS', ${notes}, ${pct}, ${ids[0] ?? null}, ${geo.latitude}, ${geo.longitude})`;
-        await addHistoryNote(id, 'IN_PROGRESS', u, `Progress ${pct}%: ${notes}`, visibility === 'PUBLIC');
+        await addHistoryNote(id, 'IN_PROGRESS', u, kind === 'ACTION_REFERENCE' ? `Action taken: ${notes}` : `Progress ${pct}%: ${notes}`, visibility === 'PUBLIC');
         await notify(c.citizen_id as string, 'PROGRESS', { code }, id);
         await audit(u, { action: 'PROGRESS_UPDATED', entityType: 'complaint', entityId: code, newValue: { pct, workDone, notes: extra, visibility, evidenceIds: ids } });
       } else if (action === 'note') {
@@ -389,7 +423,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
         if (!photos.length) throw badRequest(noIssue ? 'Site photo is required' : 'field.completionPhoto');
         if (noIssue && (geo.latitude == null || geo.longitude == null)) throw badRequest('field.needLocation');
         // Field evidence is stored separately from the citizen's evidence and never replaces it
-        const ids = await storeAll(noIssue ? 'INSPECTION' : 'COMPLETION');
+        const ids = await storeAll(noIssue ? 'INSPECTION' : 'AFTER');
         await sql`INSERT INTO completion_evidence (complaint_id, assignment_id, evidence_id, notes, latitude, longitude, gps_accuracy_m, completed_by, proposed_resolution)
                   VALUES (${id}, ${a.id}, ${ids[0]}, ${notes}, ${geo.latitude}, ${geo.longitude}, ${geo.accuracy}, ${u.id}, ${noIssue ? 'NO_ISSUE_FOUND' : 'RESOLVED'})`;
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, progress_pct, evidence_id, latitude, longitude)
@@ -622,8 +656,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
     default:
       throw badRequest('Unknown action');
   }
-  return { ok: true };
-});
+}
 
 function str(v: unknown): string | null {
   if (v == null) return null;
@@ -651,4 +684,91 @@ async function assignableUser(u: AuthUser, userId: string, allowSelf: boolean, l
     WHERE usr.id = ${userId} AND ${assignableScope(u, localBodyId)}`;
   if (!row) throw forbidden('You cannot assign to this user');
   return row;
+}
+
+const RECORD_TYPES = ['ACKNOWLEDGE', 'ACCEPT', 'INSPECT', 'ACTION_TAKEN', 'WORK_STARTED', 'WORK_COMPLETED', 'ON_HOLD', 'REWORK_REQUIRED', 'OTHER'] as const;
+type Step = { action: string; data: Record<string, unknown>; photos?: boolean };
+
+/**
+ * Maps a "Record action" (action type + description + optional photos) onto the workflow steps it stands for,
+ * from the complaint's current status and the user's part in it. Each step then runs every usual server check.
+ */
+async function planRecord(u: AuthUser, c: { id: number; status: string }, data: Record<string, unknown>, photos: File[]): Promise<LogEntry & { steps: Step[] }> {
+  const type = z.enum(RECORD_TYPES, { message: 'Choose an action type' }).parse(data.actionType);
+  const description = z.string({ message: 'Describe the action / work' }).trim().min(5, 'Describe the action / work (at least 5 characters)').max(2000).parse(data.description);
+  const visibility = z.enum(['INTERNAL', 'PUBLIC']).parse(data.visibility ?? (['ACTION_TAKEN', 'WORK_STARTED', 'WORK_COMPLETED'].includes(type) ? 'PUBLIC' : 'INTERNAL'));
+  const geo = { latitude: data.latitude, longitude: data.longitude, accuracy: data.accuracy };
+  const [mine] = await sql`SELECT status FROM assignments WHERE complaint_id = ${c.id} AND purpose = 'WORK' AND assigned_to = ${u.id} AND assignee_role IN ('PRIMARY','SUPPORT')
+                           AND status IN ${sql(ACTIVE_A)} ORDER BY (assignee_role = 'PRIMARY') DESC, created_at DESC LIMIT 1`;
+  const field = !!mine && has(u, 'complaint.work');
+  const notStarted = ['ASSIGNED', 'REWORK_REQUIRED'].includes(c.status);
+  const start: Step = { action: 'start', data: { visibility: 'INTERNAL' } };
+  const steps: Step[] = [];
+  switch (type) {
+    case 'ACKNOWLEDGE':
+      if (field && mine.status === 'PENDING' && notStarted) steps.push({ action: 'accept', data: { note: description } });
+      else steps.push({ action: 'review', data: { note: description } });
+      break;
+    case 'ACCEPT':
+      if (field && mine.status === 'PENDING' && notStarted) steps.push({ action: 'accept', data: { note: description } });
+      else if (FINAL_S.includes(c.status)) steps.push({ action: 'reopen', data: { note: description } });
+      else if (['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW'].includes(c.status) && (await sql`SELECT cat.inspection_required FROM complaints x
+                 JOIN complaint_categories cat ON cat.id = x.category_id WHERE x.id = ${c.id}`)[0]?.inspection_required) throw badRequest('Site inspection is mandatory for this category — record an Inspect action instead');
+      else if (['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED'].includes(c.status)) steps.push({ action: 'review', data: {} }, { action: 'verify_direct', data: { note: description } });
+      else if (c.status === 'INITIAL_REVIEW') steps.push({ action: 'verify_direct', data: { note: description } });
+      else throw conflict(`Action not allowed while complaint is ${c.status}`);
+      break;
+    case 'INSPECT': {
+      const inspect: Step = { action: 'inspect', data: { outcome: data.outcome ?? 'VERIFIED', notes: description, ...geo }, photos: true };
+      if (c.status === 'SITE_INSPECTION') steps.push(inspect);
+      else if (['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW'].includes(c.status)) steps.push({ action: 'schedule_inspection', data: { inspectorId: u.id } }, inspect);
+      else throw conflict(`Action not allowed while complaint is ${c.status}`);
+      break;
+    }
+    case 'ACTION_TAKEN':
+      if (!photos.length) throw badRequest('An action / reference photo is required');
+      if (notStarted) steps.push(start);
+      steps.push({ action: 'progress', data: { workDone: description, visibility, evidenceKind: 'ACTION_REFERENCE', progress: data.progress ?? 50, ...geo }, photos: true });
+      break;
+    case 'WORK_STARTED':
+      steps.push({ action: 'start', data: { note: description, visibility, ...geo }, photos: true });
+      break;
+    case 'WORK_COMPLETED':
+      if (!photos.length) throw badRequest('field.completionPhoto');
+      if (notStarted) steps.push(start);
+      steps.push({ action: 'complete', data: { notes: description, submit: true, ...geo }, photos: true });
+      break;
+    case 'ON_HOLD':
+      steps.push({ action: 'hold', data: { reason: data.holdReason ?? 'OTHER', note: description } });
+      break;
+    case 'REWORK_REQUIRED':
+      steps.push({ action: 'verify_completion', data: { decision: 'send_back', method: 'EVIDENCE', notes: description, publicReason: data.publicReason }, photos: true });
+      break;
+    case 'OTHER':
+      if (field) steps.push({ action: 'note', data: { notes: description, visibility, ...geo }, photos: true });
+      else if (photos.length) throw badRequest('Only the assigned staff can attach photos to a note');
+      else steps.push({ action: 'remark', data: { note: description, visibility } });
+      break;
+  }
+  return { steps, logType: type, description, visibility };
+}
+
+const LEGACY_TYPE: Record<string, string> = {
+  review: 'ACKNOWLEDGE', verify_direct: 'ACCEPT', accept: 'ACCEPT', schedule_inspection: 'INSPECTION_SCHEDULED', inspect: 'INSPECT', classify: 'CLASSIFY',
+  assign_supervisor: 'SUPERVISOR_ASSIGNED', assign_verifier: 'VERIFIER_ASSIGNED', set_due: 'DUE_DATE', request_info: 'INFO_REQUESTED', assign: 'ASSIGNED', reassign: 'REASSIGNED',
+  add_support: 'SUPPORT_ADDED', remove_support: 'SUPPORT_REMOVED', reopen: 'REOPENED', start: 'WORK_STARTED', progress: 'ACTION_TAKEN', note: 'OTHER', complete: 'WORK_COMPLETED',
+  report_no_issue: 'NO_ISSUE_REPORTED', submit_verification: 'SENT_FOR_VERIFICATION', hold: 'ON_HOLD', resume: 'RESUMED', close: 'CLOSED', reject: 'REJECTED', escalate: 'ESCALATED',
+  remark: 'OTHER', upload_evidence: 'EVIDENCE_UPLOADED', appeal_decide: 'APPEAL_DECIDED',
+};
+const VERIFY_TYPE: Record<string, string> = { approve: 'APPROVED', send_back: 'REWORK_REQUIRED', no_issue: 'NO_ISSUE_CONFIRMED', cannot_verify: 'CANNOT_VERIFY' };
+
+/** Log entry for a direct workflow action (the specialised forms). */
+function describeLegacy(action: string, data: Record<string, unknown>): LogEntry {
+  const logType = action === 'verify_completion'
+    ? (data.decision === 'approve' && data.close === true ? 'APPROVED_CLOSED' : VERIFY_TYPE[String(data.decision)] ?? 'VERIFICATION')
+    : LEGACY_TYPE[action] ?? 'OTHER';
+  const description = str(data.workDone) ?? str(data.notes) ?? str(data.note);
+  const chosen = data.visibility === 'PUBLIC' ? 'PUBLIC' : data.visibility === 'INTERNAL' ? 'INTERNAL' : null;
+  const visibility = chosen ?? (['close', 'reject', 'reopen', 'classify', 'request_info', 'complete'].includes(action) || (action === 'progress') ? 'PUBLIC' : 'INTERNAL');
+  return { logType, description, visibility };
 }

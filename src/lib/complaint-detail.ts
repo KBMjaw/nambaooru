@@ -31,10 +31,10 @@ export async function getComplaintDetail(where: { code: string }) {
     WHERE c.code = ${where.code}`;
   if (!c) return null;
   const id = c.id as number;
-  const [history, evidence, inspections, assignments, updates, completions, appeals, feedback] = await Promise.all([
+  const [history, evidence, inspections, assignments, updates, completions, appeals, feedback, actionLog] = await Promise.all([
     sql`SELECT h.*, r.code AS actor_role FROM complaint_status_history h LEFT JOIN users u ON u.id = h.actor_id LEFT JOIN roles r ON r.id = u.role_id
         WHERE h.complaint_id = ${id} ORDER BY h.created_at, h.id`,
-    sql`SELECT e.id, e.kind, e.media_type, e.latitude, e.longitude, e.gps_accuracy_m, e.captured_at, e.capture_source, e.created_at, e.appeal_id,
+    sql`SELECT e.id, e.kind, e.media_type, e.latitude, e.longitude, e.gps_accuracy_m, e.captured_at, e.capture_source, e.created_at, e.appeal_id, e.workflow_action_id,
                u.full_name AS uploaded_by_name
         FROM complaint_evidence e JOIN users u ON u.id = e.uploaded_by WHERE e.complaint_id = ${id} ORDER BY e.created_at`,
     sql`SELECT i.*, u.full_name AS inspector_name FROM inspections i JOIN users u ON u.id = i.inspector_id WHERE i.complaint_id = ${id} ORDER BY i.inspected_at DESC`,
@@ -46,9 +46,21 @@ export async function getComplaintDetail(where: { code: string }) {
         JOIN users u ON u.id = ce.completed_by LEFT JOIN users v ON v.id = ce.verified_by WHERE ce.complaint_id = ${id} ORDER BY ce.completed_at DESC`,
     sql`SELECT a.*, r.full_name AS reviewer_name FROM appeals a LEFT JOIN users r ON r.id = a.reviewer_id WHERE a.complaint_id = ${id} ORDER BY a.created_at DESC`,
     sql`SELECT rating, comment, created_at, updated_at FROM complaint_feedback WHERE complaint_id = ${id}`,
+    sql`SELECT l.id, l.code, l.action_type, l.description, l.visibility, l.from_status, l.to_status, l.created_at, l.actor_role,
+               u.full_name AS actor_name, r.name_en AS actor_role_en, r.name_ta AS actor_role_ta,
+               COALESCE((SELECT json_agg(json_build_object('id', e.id, 'kind', e.kind, 'video', e.media_type = 'VIDEO') ORDER BY e.id)
+                         FROM complaint_evidence e WHERE e.workflow_action_id = l.id), '[]'::json) AS evidence
+        FROM complaint_action_log l JOIN users u ON u.id = l.actor_id LEFT JOIN roles r ON r.id = u.role_id
+        WHERE l.complaint_id = ${id} ORDER BY l.created_at, l.id`,
   ]);
   const progress = (updates.find((u) => u.progress_pct != null)?.progress_pct as number | undefined) ?? (['WORK_COMPLETED', 'VERIFICATION_PENDING', 'COMPLETION_VERIFIED', 'CLOSED'].includes(c.status as string) ? 100 : null);
-  return { c, history: [...history], evidence: [...evidence], inspections: [...inspections], assignments: [...assignments], updates: [...updates], completions: [...completions], appeals: [...appeals], feedback: feedback[0] ?? null, progress };
+  return { c, history: [...history], evidence: [...evidence], inspections: [...inspections], assignments: [...assignments], updates: [...updates], completions: [...completions], appeals: [...appeals], feedback: feedback[0] ?? null, actionLog: [...actionLog] as ActionLogRow[], progress };
+}
+
+export interface ActionLogRow {
+  id: number; code: string; action_type: string; description: string | null; visibility: 'PUBLIC' | 'INTERNAL'; from_status: string; to_status: string;
+  created_at: string | Date; actor_role: string | null; actor_name: string; actor_role_en: string | null; actor_role_ta: string | null;
+  evidence: { id: number; kind: string; video: boolean }[];
 }
 
 export type ComplaintDetail = NonNullable<Awaited<ReturnType<typeof getComplaintDetail>>>;

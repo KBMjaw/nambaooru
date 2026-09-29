@@ -8,7 +8,7 @@ const ICON: Record<string, string> = {
   SUBMITTED: '📝', AI_CLASSIFIED: '🤖', INITIAL_REVIEW: '🧐', SITE_INSPECTION: '🔍', VERIFIED: '✔️', ASSIGNED: '👷', IN_PROGRESS: '🛠️', ON_HOLD: '⏸️',
   WORK_COMPLETED: '✅', VERIFICATION_PENDING: '🔎', REWORK_REQUIRED: '↩️', COMPLETION_VERIFIED: '🏁', CLOSED: '🔒', REJECTED: '⛔', DUPLICATE: '🔁', REOPENED: '🔓',
 };
-const CITIZEN_KINDS = ['CITIZEN', 'COMPLETION', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'];
+const CITIZEN_KINDS = ['CITIZEN', 'COMPLETION', 'AFTER', 'ACTION_REFERENCE', 'PROGRESS', 'BEFORE_WORK', 'APPEAL'];
 
 /**
  * Officer view of everything that happened, oldest first: every status change and note from the status history

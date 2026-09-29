@@ -29,10 +29,10 @@ const HOLD = ['MATERIAL_UNAVAILABLE', 'WEATHER', 'PERMISSION_REQUIRED', 'EXTERNA
 const MAX_PHOTOS = 5;
 
 export function ActionForm({
-  code, action, label, fields = [], users = [], supervisors = [], classify, extra = {}, tone = 'btn-navy', icon = '', defaults = {}, confirmText, startOpen = false, block = false, portal = 'OFFICE', hint,
+  code, action, label, fields = [], users = [], supervisors = [], classify, extra = {}, tone = 'btn-navy', icon = '', defaults = {}, confirmText, startOpen = false, block = false, portal = 'OFFICE', hint, notesLabel,
 }: {
   code: string; action: string; label: string; fields?: FieldKind[]; users?: UserOpt[]; supervisors?: UserOpt[]; classify?: ClassifyOpts; extra?: Record<string, unknown>;
-  tone?: string; icon?: string; defaults?: Record<string, string>; confirmText?: string; startOpen?: boolean; block?: boolean; portal?: 'OFFICE' | 'ADMIN'; hint?: string;
+  tone?: string; icon?: string; defaults?: Record<string, string>; confirmText?: string; startOpen?: boolean; block?: boolean; portal?: 'OFFICE' | 'ADMIN'; hint?: string; notesLabel?: string;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -280,7 +280,7 @@ export function ActionForm({
         </label>
       )}
       {(has('notes') || has('notesRequired')) && (
-        <label className="block"><span className="label">{has('notesRequired') ? `${t('wf.completionNote')} *` : t('complaint.notes')}</span>
+        <label className="block"><span className="label">{has('notesRequired') ? `${notesLabel ?? t('wf.completionNote')} *` : notesLabel ?? t('complaint.notes')}</span>
           <textarea className="input min-h-20" value={v.notes ?? ''} onChange={(e) => set('notes', e.target.value)} maxLength={2000} />
         </label>
       )}
