@@ -23,7 +23,7 @@ import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
  * add remarks and reopen — all audited. Field decisions (inspection, rejection, verification, closure) remain
  * with the local body's officials.
  */
-export default async function AdminComplaint({ params }: { params: Promise<{ code: string }> }) {
+export default async function AdminComplaint({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ action?: string }> }) {
   const u = await requirePageUser('ADMIN', 'complaint.view.all');
   const { t, lang } = await getT();
   const code = decodeURIComponent((await params).code);
@@ -49,7 +49,7 @@ export default async function AdminComplaint({ params }: { params: Promise<{ cod
         {(c.escalation_level as number) > 0 && <p className="mt-1 text-sm font-semibold text-amber-800">⬆️ {t('wf.escLevel', { n: c.escalation_level as number })}{c.escalation_note ? ` — ${c.escalation_note}` : ''}</p>}
         <p className="mt-1 text-sm">👤 <Link className="font-semibold text-navy-700 underline" href={`/admin/citizens/${c.citizen_id}`}>{c.citizen_name as string}</Link>{c.assigned_name ? <> · 👷 {c.assigned_name as string}</> : null}</p>
       </div>
-      <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length}>
+      <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length} startOpen={(await searchParams).action === '1'}>
         {[...(record.types.length ? [<RecordAction key="record" code={code} portal="ADMIN" types={record.types} photoTypes={record.photoTypes} />] : []), ...review, ...actions]}
       </TakeAction>
       <ReviewPanel d={d} lang={lang} buttons={review} />

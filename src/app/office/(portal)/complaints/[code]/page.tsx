@@ -25,7 +25,7 @@ import { ComplaintMiniMap } from '@/components/office/ComplaintMiniMap';
 import { ActionsPanel, type ActionRow } from '@/components/office/ActionsPanel';
 import type { MessageKey } from '@/i18n';
 
-export default async function OfficeComplaintDetail({ params }: { params: Promise<{ code: string }> }) {
+export default async function OfficeComplaintDetail({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<{ action?: string }> }) {
   const u = await requirePageUser('OFFICE');
   const { code: raw } = await params;
   const code = decodeURIComponent(raw);
@@ -116,7 +116,7 @@ export default async function OfficeComplaintDetail({ params }: { params: Promis
         )}
       </div>
 
-      <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length + appealNodes.length} startOpen={appealNodes.length > 0}>
+      <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length + appealNodes.length} startOpen={appealNodes.length > 0 || (await searchParams).action === '1'}>
         {[...(record.types.length ? [<RecordAction key="record" code={code} types={record.types} photoTypes={record.photoTypes} />] : []), ...review, ...appealNodes, ...actions]}
       </TakeAction>
 

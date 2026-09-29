@@ -1030,6 +1030,8 @@ const ta: Messages = {
   'ct.photos': '{n} புகைப்படம்(கள்)',
   'ct.decision': 'ஒப்புதல் / மீண்டும் பணி',
   'ct.reworkAsked': 'மீண்டும் பணி தேவை',
+  'office.open': 'பார் / திற',
+  'common.actions': 'நடவடிக்கைகள்',
 };
 
 export default ta;

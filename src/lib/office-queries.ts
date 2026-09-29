@@ -119,7 +119,9 @@ export async function listComplaints(u: AuthUser, f: Filters, limit = 50) {
            c.title_en, c.title_ta, c.latitude, c.longitude, c.supporters_count,
            cat.icon, cat.code AS category_code, cat.name_en AS category_en, cat.name_ta AS category_ta,
            w.ward_number, COALESCE(s.name_en, c.street_text) AS street, COALESCE(s.name_ta, c.street_text) AS street_ta,
-           au.full_name AS assigned_name, count(*) OVER()::int AS total_count
+           au.full_name AS assigned_name, c.inspector_id = ${u.id} AS my_inspection,
+           EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.assigned_to = ${u.id} AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS')) AS on_team,
+           count(*) OVER()::int AS total_count
     FROM complaints c
     LEFT JOIN complaint_categories cat ON cat.id = c.category_id
     LEFT JOIN wards w ON w.id = c.ward_id
@@ -128,7 +130,28 @@ export async function listComplaints(u: AuthUser, f: Filters, limit = 50) {
     WHERE (${complaintScope(u)}) AND ${filterSql(f, u)}
     ORDER BY (c.status IN ('CLOSED','REJECTED','DUPLICATE')), CASE c.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, c.created_at DESC
     LIMIT ${limit} OFFSET ${(page - 1) * limit}`;
-  return { rows: [...rows], total: (rows[0]?.total_count as number) ?? 0, page, limit };
+  return { rows: rows.map((r) => Object.assign(r, { can_act: canTakeAction(u, r) })), total: (rows[0]?.total_count as number) ?? 0, page, limit };
+}
+
+const FINAL = ['CLOSED', 'REJECTED', 'DUPLICATE'];
+const INTAKE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION'];
+const WORK = ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'];
+
+/**
+ * Whether the list shows a TAKE ACTION button for this row: the same permission / status / assignment gates the
+ * complaint page uses to build its TAKE ACTION options (complaintActions). Display only — the action API re-checks all of it.
+ */
+export function canTakeAction(u: AuthUser, r: Record<string, unknown>) {
+  const status = r.status as string;
+  if (FINAL.includes(status)) return has(u, 'complaint.reopen');
+  if (has(u, 'complaint.review') || has(u, 'complaint.assign') || has(u, 'complaint.remark') || r.on_team) return true;
+  if (has(u, 'complaint.reject') || (has(u, 'complaint.escalate') && ((r.escalation_level as number) ?? 0) < 4)) return true;
+  if (has(u, 'complaint.verify') && ['WORK_COMPLETED', 'VERIFICATION_PENDING'].includes(status)) return true;
+  if (has(u, 'complaint.close') && status === 'COMPLETION_VERIFIED') return true;
+  if (has(u, 'complaint.schedule_inspection') && INTAKE.includes(status)) return true;
+  if (has(u, 'complaint.reassign') && WORK.includes(status)) return true;
+  if (has(u, 'complaint.inspect') && status === 'SITE_INSPECTION' && (u.scope !== 'ASSIGNED' || r.my_inspection)) return true;
+  return false;
 }
 
 export async function filterOptions(u: AuthUser) {

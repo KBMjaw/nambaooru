@@ -1028,6 +1028,8 @@ const en = {
   'ct.photos': '{n} photo(s)',
   'ct.decision': 'Approved / rework',
   'ct.reworkAsked': 'Rework required',
+  'office.open': 'View / Open',
+  'common.actions': 'Actions',
 };
 
 export default en;

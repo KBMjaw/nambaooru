@@ -1,5 +1,5 @@
 'use client';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useI18n } from '@/i18n/client';
 
 /**
@@ -10,6 +10,9 @@ import { useI18n } from '@/i18n/client';
 export function TakeAction({ nextStep, count, children, startOpen = false }: { nextStep: string; count: number; children: ReactNode; startOpen?: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(startOpen);
+  const ref = useRef<HTMLDivElement>(null);
+  // Opened from the complaints list ("TAKE ACTION" on a row): bring the panel into view
+  useEffect(() => { if (startOpen) ref.current?.scrollIntoView({ block: 'start' }); }, [startOpen]);
   if (!count) {
     return (
       <div id="take-action" className="card border-slate-200 p-4">
@@ -20,7 +23,7 @@ export function TakeAction({ nextStep, count, children, startOpen = false }: { n
     );
   }
   return (
-    <div id="take-action" className="card border-2 border-leaf-500/60 p-4">
+    <div id="take-action" ref={ref} className="card scroll-mt-4 border-2 border-leaf-500/60 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-bold uppercase tracking-wide text-leaf-700">{t('wf.nextStep')}</p>
