@@ -30,15 +30,16 @@ interface Analysis {
 interface Dup { id: number; code: string; status: string; updatedAt: string; street: string | null; streetTa: string | null; wardNumber: number | null; distanceM: number | null; supporters: number; summaryEn: string; summaryTa: string; supportToken: string }
 interface Evidence { file: File; url: string; hash: string | null; media: 'PHOTO' | 'VIDEO'; source: 'CAMERA' | 'UPLOAD'; capturedAt: string }
 type Phase = 'describe' | 'analyzing' | 'confirm' | 'evidence' | 'checking' | 'duplicates' | 'submitting' | 'done';
-interface Msg { from: 'bot' | 'user'; text: string }
+interface Msg { from: 'bot' | 'user'; text: string; key?: MessageKey }
 
 export function ReportWizard({ me, categories, localBodies }: { me: Me; categories: Category[]; localBodies: Opt[] }) {
   const { t, lang } = useI18n();
   const [phase, setPhase] = useState<Phase>('describe');
-  const [chat, setChat] = useState<Msg[]>([{ from: 'bot', text: t('report.greeting') }]);
+  const [chat, setChat] = useState<Msg[]>([{ from: 'bot', text: '', key: 'report.greeting' }]);
   const [text, setText] = useState('');
   const [inputMode, setInputMode] = useState<'TEXT' | 'VOICE'>('TEXT');
-  const [speechLang, setSpeechLang] = useState(lang === 'en' ? 'en-IN' : 'ta-IN');
+  // The top language switcher (E / த) is the only language setting: it drives both the UI and speech recognition
+  const speechLang = lang === 'en' ? 'en-IN' : 'ta-IN';
   const speech = useSpeech(speechLang);
   const [error, setError] = useState<string | null>(null);
 
@@ -232,7 +233,7 @@ export function ReportWizard({ me, categories, localBodies }: { me: Me; categori
 
   function restartVoice() {
     setAnalysis(null); setText(''); speech.reset(); setPhase('describe');
-    setChat((c) => [...c, { from: 'bot', text: t('report.greeting') }]);
+    setChat((c) => [...c, { from: 'bot', text: '', key: 'report.greeting' }]);
     speech.start();
   }
 
@@ -272,7 +273,7 @@ export function ReportWizard({ me, categories, localBodies }: { me: Me; categori
         {chat.map((m, i) => (
           <div key={i} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] whitespace-pre-line rounded-2xl px-4 py-2.5 text-[15px] ${m.from === 'user' ? 'rounded-br-md bg-navy-700 text-white' : 'rounded-bl-md bg-leaf-50 text-slate-800'}`}>
-              {m.from === 'bot' && <span className="mr-1" aria-hidden>🤖</span>}{m.text}
+              {m.from === 'bot' && <span className="mr-1" aria-hidden>🤖</span>}{m.key ? t(m.key) : m.text}
             </div>
           </div>
         ))}
@@ -295,13 +296,7 @@ export function ReportWizard({ me, categories, localBodies }: { me: Me; categori
             >
               <span className="relative">{speech.listening ? '⏹' : '🎙️'}</span>
             </button>
-            <span className="text-sm font-bold text-slate-700">{speech.listening ? t('report.listening') : t('report.speak')}</span>
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              {t('report.langHint')}:
-              {[['ta-IN', 'தமிழ்'], ['en-IN', 'English']].map(([code, label]) => (
-                <button key={code} type="button" onClick={() => setSpeechLang(code)} className={`rounded-full px-2 py-0.5 font-bold ${speechLang === code ? 'bg-navy-700 text-white' : 'bg-slate-100'}`}>{label}</button>
-              ))}
-            </div>
+            <span data-testid="speech-indicator" data-speech-lang={speechLang} className="text-sm font-bold text-slate-700">{speech.listening ? t('report.listening') : `🎙️ ${t('report.speak')}`}</span>
             {(speech.interim || (speech.listening && speech.finalText)) && (
               <p className="w-full rounded-xl bg-slate-50 p-3 text-slate-700">{speech.finalText} <span className="text-slate-400">{speech.interim}</span></p>
             )}

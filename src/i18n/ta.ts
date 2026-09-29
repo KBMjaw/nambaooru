@@ -111,7 +111,7 @@ const ta: Messages = {
   'report.title': 'பிரச்சனையைச் சொல்லுங்கள்',
   'report.intro': 'உங்கள் சொந்த வார்த்தைகளில் பிரச்சனையைச் சொல்லுங்கள் — தமிழ், ஆங்கிலம் அல்லது இரண்டும்.',
   'report.greeting': 'வணக்கம்! உங்களுக்கு என்ன பிரச்சனை? பேசலாம் அல்லது எழுதலாம்.',
-  'report.placeholder': 'எ.கா. "எங்க தெருவுல ரெண்டு நாளா street light எரியல"',
+  'report.placeholder': 'உங்கள் பிரச்சனையை சொல்லுங்கள்...',
   'report.speak': 'பேசுங்கள்',
   'report.stop': 'நிறுத்து',
   'report.listening': 'கேட்கிறேன்… இப்போது பேசுங்கள்',
@@ -172,7 +172,6 @@ const ta: Messages = {
   'report.step.confirm': 'உறுதி',
   'report.step.evidence': 'ஆதாரம்',
   'report.step.submit': 'சமர்ப்பி',
-  'report.langHint': 'பேச்சு மொழி',
 
   'complaint.id': 'புகார் எண்',
   'complaint.category': 'வகை',

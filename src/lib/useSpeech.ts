@@ -62,6 +62,13 @@ export function useSpeech(lang: string) {
   const stop = useCallback(() => { rec.current?.stop(); }, []);
 
   useEffect(() => () => rec.current?.abort(), []);
+  // Language switched while listening: stop, so the next "Speak" starts in the new language
+  // (the half-spoken text is dropped rather than submitted)
+  useEffect(() => {
+    if (!rec.current) return;
+    finalRef.current = ''; setFinalText(''); setInterim('');
+    rec.current.abort();
+  }, [lang]);
 
   return { supported, listening, interim, finalText, error, start, stop, reset: () => { finalRef.current = ''; setFinalText(''); setInterim(''); } };
 }

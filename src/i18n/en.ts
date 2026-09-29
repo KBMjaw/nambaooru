@@ -109,7 +109,7 @@ const en = {
   'report.title': 'Report a Problem',
   'report.intro': 'Tell me the problem in your own words — Tamil, English or both.',
   'report.greeting': 'Vanakkam! What problem are you facing? You can speak or type.',
-  'report.placeholder': 'e.g. "Enga street light rendu naala eriyala"',
+  'report.placeholder': 'Describe your problem...',
   'report.speak': 'Speak',
   'report.stop': 'Stop',
   'report.listening': 'Listening… speak now',
@@ -170,7 +170,6 @@ const en = {
   'report.step.confirm': 'Confirm',
   'report.step.evidence': 'Evidence',
   'report.step.submit': 'Submit',
-  'report.langHint': 'Speech language',
 
   'complaint.id': 'Complaint ID',
   'complaint.category': 'Category',
