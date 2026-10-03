@@ -6,6 +6,8 @@ import { trMsg, type MessageKey } from '@/i18n';
 import { api } from '@/lib/client-api';
 import { compressImage, getLocation, type Geo } from '@/lib/image';
 import { Alert, Spinner } from '@/components/ui';
+import type { CompletionPolicy } from '@/lib/completion-policy';
+import { completionError, distanceTo, photoMeta, policyLines, type PickedPhoto } from './completion-ui';
 
 export type FieldKind =
   | 'note' | 'notes' | 'photo' | 'photoRequired' | 'gps' | 'gpsRequired' | 'progress' | 'outcome' | 'reason'
@@ -29,10 +31,12 @@ const HOLD = ['MATERIAL_UNAVAILABLE', 'WEATHER', 'PERMISSION_REQUIRED', 'EXTERNA
 const MAX_PHOTOS = 5;
 
 export function ActionForm({
-  code, action, label, fields = [], users = [], supervisors = [], classify, extra = {}, tone = 'btn-navy', icon = '', defaults = {}, confirmText, startOpen = false, block = false, portal = 'OFFICE', hint, notesLabel,
+  code, action, label, fields = [], users = [], supervisors = [], classify, extra = {}, tone = 'btn-navy', icon = '', defaults = {}, confirmText, startOpen = false, block = false, portal = 'OFFICE', hint, notesLabel, completion,
 }: {
   code: string; action: string; label: string; fields?: FieldKind[]; users?: UserOpt[]; supervisors?: UserOpt[]; classify?: ClassifyOpts; extra?: Record<string, unknown>;
   tone?: string; icon?: string; defaults?: Record<string, string>; confirmText?: string; startOpen?: boolean; block?: boolean; portal?: 'OFFICE' | 'ADMIN'; hint?: string; notesLabel?: string;
+  /** "Mark as completed" / site report: photo + GPS rules for this officer (distance, live photo) */
+  completion?: CompletionPolicy;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -45,10 +49,13 @@ export function ActionForm({
   const [support, setSupport] = useState<Set<string>>(new Set());
   const url = `/api/office/complaints/${encodeURIComponent(code)}/action?portal=${portal}`;
   const roleLabel = (u: UserOpt) => u.role_name ?? t(`role.${u.role}` as MessageKey);
-  const [photos, setPhotos] = useState<{ file: File; url: string }[]>([]);
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [geo, setGeo] = useState<Geo | null>(null);
   const [geoBusy, setGeoBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const allowGallery = !!completion && !completion.liveOnly;
+  const dist = distanceTo(completion, geo);
   const has = (f: FieldKind) => fields.includes(f);
   const needsPhoto = has('photoRequired');
   const fieldVerify = has('method') && v.method === 'FIELD';
@@ -69,6 +76,7 @@ export function ActionForm({
     if (has('workDone') && (v.workDone ?? '').trim().length < 2) return setError(t('wf.workDoneNeeded'));
     if (fieldVerify && (v.notes ?? '').trim().length < 3) return setError(t('wf.fieldNotesNeeded'));
     if (needsGps && !geo) return setError(t('field.needLocation'));
+    if (completion) { const err = completionError(t, completion, geo, photos); if (err) return setError(err); }
     if (has('noteRequired') && (v.note ?? '').trim().length < 3) return setError(t('err.reasonRequired'));
     if (confirmText && !window.confirm(confirmText)) return;
     setBusy(true);
@@ -78,6 +86,7 @@ export function ActionForm({
     if (has('submitToggle')) data.submit = submitNow;
     if (has('supporters')) data.supportIds = [...support].filter((x) => x !== v.assigneeId);
     if (geo) Object.assign(data, { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy });
+    if (photos.length) data.photoMeta = photoMeta(photos);
     try {
       if (photos.length) {
         const fd = new FormData();
@@ -110,6 +119,11 @@ export function ActionForm({
     <div className="w-full space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
       <p className="font-bold text-slate-800">{icon} {label}</p>
       {hint && <p className="text-sm text-slate-600">{hint}</p>}
+      {completion && (
+        <ul data-testid="completion-policy" className="space-y-0.5 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">
+          {policyLines(t, completion).map((l) => <li key={l}>{l}</li>)}
+        </ul>
+      )}
       {error && <Alert tone="error">{error}</Alert>}
 
       {has('classify') && classify && (
@@ -305,21 +319,29 @@ export function ActionForm({
               </span>
             ))}
             {photos.length < MAX_PHOTOS && <button type="button" className="btn btn-outline min-h-12" onClick={() => fileRef.current?.click()}>📷 {t('report.takePhoto')}</button>}
+            {photos.length < MAX_PHOTOS && allowGallery && <button type="button" className="btn btn-ghost min-h-12" onClick={() => galleryRef.current?.click()}>🖼️ {t('complete.gallery')}</button>}
           </div>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={async (e) => {
-            const fs = [...(e.target.files ?? [])].slice(0, MAX_PHOTOS - photos.length);
-            e.target.value = '';
-            for (const f of fs) {
-              try { const c = await compressImage(f); setPhotos((ps) => (ps.length < MAX_PHOTOS ? [...ps, { file: c.file, url: c.url }] : ps)); } catch { setError(t('err.fileType')); }
-            }
-            if (fs.length && !geo) void captureGps();
-          }} />
+          {(allowGallery ? (['CAMERA', 'FILE'] as const) : (['CAMERA'] as const)).map((source) => (
+            <input key={source} ref={source === 'CAMERA' ? fileRef : galleryRef} data-testid={source === 'CAMERA' ? 'action-photo' : 'action-gallery'} type="file" accept="image/*"
+              capture={source === 'CAMERA' ? 'environment' : undefined} multiple hidden onChange={async (e) => {
+                const fs = [...(e.target.files ?? [])].slice(0, MAX_PHOTOS - photos.length);
+                e.target.value = '';
+                for (const f of fs) {
+                  try {
+                    const c = await compressImage(f);
+                    setPhotos((ps) => (ps.length < MAX_PHOTOS ? [...ps, { file: c.file, url: c.url, source, lastModified: f.lastModified || Date.now() }] : ps));
+                  } catch { setError(t('err.fileType')); }
+                }
+                if (fs.length && !geo) void captureGps();
+              }} />
+          ))}
         </div>
       )}
       {(has('gps') || needsGps) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <button type="button" className="btn btn-outline btn-sm" onClick={captureGps} disabled={geoBusy}>{geoBusy ? <Spinner className="h-4 w-4" /> : '📍'} {t('office.captureGps')}</button>
           {geo && <span className="text-leaf-700">✓ {t('office.gpsOk')} ({geo.latitude.toFixed(5)}, {geo.longitude.toFixed(5)} ±{geo.accuracy}m)</span>}
+          {dist != null && <span data-testid="completion-distance" className={completion?.maxDistanceM != null && dist > completion.maxDistanceM ? 'font-bold text-red-700' : 'text-slate-600'}>· {t('complete.distance', { d: dist })}</span>}
         </div>
       )}
       {has('submitToggle') && (

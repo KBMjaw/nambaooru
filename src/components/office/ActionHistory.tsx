@@ -73,7 +73,13 @@ export function ReviewPanel({ d, lang, buttons }: { d: ComplaintDetail; lang: La
       <dl className="grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
         <div><dt className="inline text-slate-500">{t('rv.completedBy')}: </dt><dd className="inline font-semibold">{pending.completed_by_name as string}</dd></div>
         <div><dt className="inline text-slate-500">🗓️ </dt><dd className="inline font-semibold">{fmtDateTime(pending.completed_at as string, lang)}</dd></div>
-        {pending.latitude != null && <div><dt className="inline text-slate-500">📍 </dt><dd className="inline">{(pending.latitude as number).toFixed(5)}, {(pending.longitude as number).toFixed(5)}</dd></div>}
+        {pending.latitude != null && <div><dt className="inline text-slate-500">📍 </dt><dd className="inline">{(pending.latitude as number).toFixed(5)}, {(pending.longitude as number).toFixed(5)}{pending.gps_accuracy_m != null ? ` ±${Math.round(pending.gps_accuracy_m as number)}m` : ''}</dd></div>}
+        {pending.latitude != null && (
+          <div data-testid="review-distance"><dt className="inline text-slate-500">{t('rv.distance')}: </dt>
+            <dd className="inline font-semibold">{pending.distance_m != null ? `${Math.round(pending.distance_m as number)} m` : c.latitude == null ? t('rv.noTargetGps') : '—'}</dd></div>
+        )}
+        {pending.capture_device != null && <div><dt className="inline text-slate-500">{t('rv.device')}: </dt><dd className="inline font-semibold">{t(`rv.device${pending.capture_device as 'MOBILE' | 'DESKTOP'}`)}</dd></div>}
+        {pending.live_photo != null && <div><dt className="inline text-slate-500">📷 </dt><dd className="inline font-semibold">{t(pending.live_photo ? 'rv.live' : 'rv.uploaded')}</dd></div>}
       </dl>
       {earlier.length > 0 && (
         <details className="mt-2 text-sm">

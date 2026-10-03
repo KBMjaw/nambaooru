@@ -215,7 +215,7 @@ const pt = (await panel.count()) ? await panel.innerText() : '';
 ok('review', 'reviewer sees: citizen complaint → before → action history → work description → after → completion details',
   ['1. CITIZEN COMPLAINT', '2. BEFORE', '3. ACTION HISTORY', '4. STAFF WORK DESCRIPTION', '5. AFTER', '6. COMPLETION DETAILS'].every((h) => pt.toUpperCase().includes(h)) && pt.includes('Street light near the bus stand') && pt.includes('LED driver replaced'), 'checked');
 ok('review', 'before (citizen) and after (action) photos both shown', (await panel.locator('img[src^="/api/evidence/"]').count()) >= 3, await panel.locator('img[src^="/api/evidence/"]').count());
-ok('review', 'APPROVE & CLOSE and REJECT / REWORK buttons shown', (await panel.getByRole('button', { name: /APPROVE & CLOSE/ }).count()) && (await panel.getByRole('button', { name: /REJECT \/ REWORK/ }).count()), 'checked');
+ok('review', 'supervisor: REJECT / REWORK shown, no APPROVE & CLOSE (final approval is the EO\'s)', !(await panel.getByRole('button', { name: /APPROVE & CLOSE/ }).count()) && (await panel.getByRole('button', { name: /REJECT \/ REWORK/ }).count()), 'checked');
 await shot(S, '2-reviewer-review-panel');
 const REWORK_REASON = `Lamp cover missing on site photo (${TAG})`;
 r = await formAction(S, 'REJECT / REWORK', async (f) => { await f.locator('textarea').first().fill(REWORK_REASON); });

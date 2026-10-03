@@ -13,6 +13,7 @@ import { escalateComplaint } from '@/lib/escalation';
 import { routeComplaint } from '@/lib/routing';
 import { notify } from '@/lib/notify';
 import { notifyOfficials } from '@/lib/complaints';
+import { completionPolicy, distanceM, isLivePhoto, isMobileUA, type PhotoMeta } from '@/lib/completion-policy';
 
 const OUTCOMES = ['VERIFIED', 'NOT_FOUND', 'DUPLICATE', 'ALREADY_RESOLVED', 'INVALID', 'REQUIRES_HIGHER_AUTHORITY'] as const;
 export const HOLD_LABEL: Record<string, { en: string; ta: string }> = {
@@ -27,6 +28,8 @@ const ACTIVE_A = ['PENDING', 'ACCEPTED', 'IN_PROGRESS'];
 /** Statuses in which a complaint may be finished with a resolution type (reject / duplicate). */
 const RESOLVABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
 const FINAL_S = ['CLOSED', 'REJECTED', 'DUPLICATE'];
+/** Statuses from which an officer handling the complaint may mark it completed (no field assignment needed). */
+const OFFICER_COMPLETABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'];
 
 type Ctx = { params: Promise<{ code: string }> };
 
@@ -58,11 +61,13 @@ export const POST = route<Ctx>(async (req, { params }) => {
 
   const [c0] = await sql`SELECT c.id, c.status FROM complaints c WHERE c.code = ${code} AND (${complaintScope(u)})`;
   if (!c0) throw notFound('Complaint not found in your jurisdiction');
-  const run: Run = { u, code, stored: [] };
+  // Mobile or PC / laptop decides whether a gallery photo is accepted for a lower-grade completion
+  const mobile = isMobileUA(req.headers.get('sec-ch-ua-mobile'), req.headers.get('user-agent'));
+  const run: Run = { u, code, stored: [], mobile };
   let entry: LogEntry;
   if (action === 'record') {
     // "Record action": one form with an action type and a description, mapped onto the workflow steps below
-    const plan = await planRecord(u, c0 as { id: number; status: string }, data, photos);
+    const plan = await planRecord(u, c0 as { id: number; status: string }, data, photos, mobile);
     for (const s of plan.steps) await perform(run, s.action, s.data, s.photos ? photos : []);
     entry = plan;
   } else {
@@ -78,7 +83,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   return { ok: true, actionCode: log.code as string, status: after.status as string, evidenceIds: run.stored };
 });
 
-interface Run { u: AuthUser; code: string; stored: number[] }
+interface Run { u: AuthUser; code: string; stored: number[]; mobile: boolean }
 interface LogEntry { logType: string; description: string | null; visibility: 'PUBLIC' | 'INTERNAL' }
 
 /** Runs one workflow action; every check (permission, scope, status, identity) happens here on the server. */
@@ -97,14 +102,15 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
   const status = c.status as string;
   const catVars = { code, category_en: c.cat_en as string, category_ta: c.cat_ta as string };
   /** Store every uploaded photo as evidence of `kind`; returns the ids (first = main). */
-  const storeAll = async (kind: Parameters<typeof storeEvidence>[1]) => {
+  const storeAll = async (kind: Parameters<typeof storeEvidence>[1], source: 'CAMERA' | 'UPLOAD' = 'CAMERA') => {
     const ids: number[] = [];
-    for (const f of photos) ids.push(await storeEvidence(id, kind, f, u.id, { ...geo, capturedAt: new Date().toISOString(), source: 'CAMERA' }) as number);
+    for (const f of photos) ids.push(await storeEvidence(id, kind, f, u.id, { ...geo, capturedAt: new Date().toISOString(), source }) as number);
     run.stored.push(...ids);
     if (ids.length) await audit(u, { action: 'EVIDENCE_UPLOADED', entityType: 'complaint', entityId: code, newValue: { kind, evidenceIds: ids } });
     return ids;
   };
   /** Active supervisors on this complaint (they hear about holds, completions and escalations). */
+  const completionEvidence = (noIssue: boolean) => checkCompletion(u, run.mobile, c, data, photos, noIssue);
   const supervisors = async () => (await sql`SELECT assigned_to FROM assignments WHERE complaint_id = ${id} AND purpose = 'WORK' AND assignee_role = 'SUPERVISOR' AND status IN ${sql(ACTIVE_A)}`).map((r) => r.assigned_to as string);
 
   switch (action) {
@@ -366,10 +372,31 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
     case 'note':
     case 'complete':
     case 'report_no_issue': {
-      need('complaint.work');
       // Primary and supporting assignees can all report on the work (supervisors oversee, they do not report field work)
-      const [a] = await sql`SELECT * FROM assignments WHERE complaint_id = ${id} AND purpose = 'WORK' AND assigned_to = ${u.id} AND assignee_role IN ('PRIMARY','SUPPORT')
-                            AND status IN ${sql(ACTIVE_A)} ORDER BY (assignee_role = 'PRIMARY') DESC, created_at DESC LIMIT 1`;
+      const [a] = has(u, 'complaint.work') ? await sql`SELECT * FROM assignments WHERE complaint_id = ${id} AND purpose = 'WORK' AND assigned_to = ${u.id} AND assignee_role IN ('PRIMARY','SUPPORT')
+                            AND status IN ${sql(ACTIVE_A)} ORDER BY (assignee_role = 'PRIMARY') DESC, created_at DESC LIMIT 1` : [];
+      if (!a && action === 'complete' && has(u, 'complaint.complete')) {
+        // "Mark as completed" by an officer handling the complaint (Supervisor, Dept officer, EO), from any open
+        // stage before completion, without a field assignment. The EO or an Admin gives the final approval.
+        requireStatus(...OFFICER_COMPLETABLE);
+        const notes = z.string().trim().min(5, 'A completion note is required').max(2000).parse(data.notes);
+        const ev = completionEvidence(false);
+        const ids = await storeAll('AFTER', ev.source);
+        await sql`INSERT INTO completion_evidence (complaint_id, assignment_id, evidence_id, notes, latitude, longitude, gps_accuracy_m, completed_by, proposed_resolution,
+                    completed_by_rank, distance_m, capture_device, live_photo)
+                  VALUES (${id}, NULL, ${ids[0]}, ${notes}, ${geo.latitude}, ${geo.longitude}, ${geo.accuracy}, ${u.id}, 'RESOLVED', ${u.roleRank}, ${ev.dist}, ${ev.device}, ${ev.live})`;
+        await sql`INSERT INTO work_updates (complaint_id, user_id, update_type, notes, progress_pct, evidence_id, latitude, longitude)
+                  VALUES (${id}, ${u.id}, 'COMPLETED', ${notes}, 100, ${ids[0]}, ${geo.latitude}, ${geo.longitude})`;
+        // Field work still open on this complaint is finished with it; a pending site inspection is no longer needed
+        await sql`UPDATE assignments SET status = 'COMPLETED', completed_at = now() WHERE complaint_id = ${id} AND purpose = 'WORK' AND assignee_role IN ('PRIMARY','SUPPORT') AND status IN ${sql(ACTIVE_A)}`;
+        await sql`UPDATE assignments SET status = 'CANCELLED' WHERE complaint_id = ${id} AND purpose = 'INSPECTION' AND status IN ${sql(ACTIVE_A)}`;
+        await transition(id, 'WORK_COMPLETED', u, { note: notes, skipCitizenNotify: true, auditAction: 'WORK_COMPLETED' });
+        await transition(id, 'VERIFICATION_PENDING', u, { note: 'Submitted for final approval' });
+        await notifyFinalApprovers(id, c.local_body_id as number, u, catVars);
+        for (const s of await supervisors()) if (s !== u.id) await notify(s, 'WORK_REVIEW', catVars, id);
+        break;
+      }
+      need('complaint.work');
       if (!a) throw forbidden('This work is not assigned to you');
       if (action === 'accept') {
         requireStatus('ASSIGNED', 'REWORK_REQUIRED');
@@ -418,14 +445,14 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
         const noIssue = action === 'report_no_issue';
         requireStatus(...(noIssue ? ['ASSIGNED', 'IN_PROGRESS'] : ['IN_PROGRESS']));
         const notes = z.string().trim().min(5, noIssue ? 'Notes are required' : 'A completion note is required').max(2000).parse(data.notes);
-        // The after-work (reference) photo is mandatory; GPS is recorded when the phone provides it, and is
-        // mandatory only for a "no issue found" report, which rests entirely on the site visit.
-        if (!photos.length) throw badRequest(noIssue ? 'Site photo is required' : 'field.completionPhoto');
-        if (noIssue && (geo.latitude == null || geo.longitude == null)) throw badRequest('field.needLocation');
+        // The reference photo and GPS are mandatory; lower grade must be on site with a live photo (completionEvidence)
+        const ev = completionEvidence(noIssue);
         // Field evidence is stored separately from the citizen's evidence and never replaces it
-        const ids = await storeAll(noIssue ? 'INSPECTION' : 'AFTER');
-        await sql`INSERT INTO completion_evidence (complaint_id, assignment_id, evidence_id, notes, latitude, longitude, gps_accuracy_m, completed_by, proposed_resolution)
-                  VALUES (${id}, ${a.id}, ${ids[0]}, ${notes}, ${geo.latitude}, ${geo.longitude}, ${geo.accuracy}, ${u.id}, ${noIssue ? 'NO_ISSUE_FOUND' : 'RESOLVED'})`;
+        const ids = await storeAll(noIssue ? 'INSPECTION' : 'AFTER', ev.source);
+        await sql`INSERT INTO completion_evidence (complaint_id, assignment_id, evidence_id, notes, latitude, longitude, gps_accuracy_m, completed_by, proposed_resolution,
+                    completed_by_rank, distance_m, capture_device, live_photo)
+                  VALUES (${id}, ${a.id}, ${ids[0]}, ${notes}, ${geo.latitude}, ${geo.longitude}, ${geo.accuracy}, ${u.id}, ${noIssue ? 'NO_ISSUE_FOUND' : 'RESOLVED'},
+                    ${u.roleRank}, ${ev.dist}, ${ev.device}, ${ev.live})`;
         await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes, progress_pct, evidence_id, latitude, longitude)
                   VALUES (${id}, ${a.id}, ${u.id}, ${noIssue ? 'NO_ISSUE' : 'COMPLETED'}, ${notes}, ${noIssue ? null : 100}, ${ids[0]}, ${geo.latitude}, ${geo.longitude})`;
         await sql`UPDATE assignments SET status = 'COMPLETED', completed_at = now() WHERE complaint_id = ${id} AND purpose = 'WORK' AND assignee_role IN ('PRIMARY','SUPPORT') AND status IN ${sql(ACTIVE_A)}`;
@@ -433,12 +460,10 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
           await transition(id, 'VERIFICATION_PENDING', u, { note: `Field report — no issue found: ${notes}`, publicNote: false, skipCitizenNotify: true, auditAction: 'NO_ISSUE_REPORTED' });
           await notifyOfficials(id, 'NO_ISSUE_REPORTED', {}, { includeWardMember: false });
         } else {
-          const submit = data.submit !== false; // "Submit for verification" is on by default
-          await transition(id, 'WORK_COMPLETED', u, { note: notes, skipCitizenNotify: submit, auditAction: 'WORK_COMPLETED' });
-          if (submit) {
-            await transition(id, 'VERIFICATION_PENDING', u, { note: 'Submitted for verification' });
-            await notifyOfficials(id, 'WORK_REVIEW', {}, { includeWardMember: false });
-          }
+          // Completed work always goes on for final approval
+          await transition(id, 'WORK_COMPLETED', u, { note: notes, skipCitizenNotify: true, auditAction: 'WORK_COMPLETED' });
+          await transition(id, 'VERIFICATION_PENDING', u, { note: 'Submitted for final approval' });
+          await notifyOfficials(id, 'WORK_REVIEW', {}, { includeWardMember: false });
         }
         for (const s of await supervisors()) await notify(s, noIssue ? 'NO_ISSUE_REPORTED' : 'WORK_REVIEW', catVars, id);
       }
@@ -482,10 +507,13 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
     }
 
     case 'verify_completion': {
-      need('complaint.verify');
       requireStatus('VERIFICATION_PENDING', 'WORK_COMPLETED');
       // approve / send_back (rework), or a field-visit finding that ends the complaint without work
       const decision = z.enum(['approve', 'send_back', 'no_issue', 'cannot_verify']).parse(data.decision);
+      // Final approval (approve & close, or a finding that ends the complaint) belongs to the EO or an Admin above
+      // the EO; a Supervisor / Dept officer who verifies work can only send it back for rework.
+      if (decision === 'send_back') { if (!has(u, 'complaint.verify') && !has(u, 'complaint.final_approve')) throw forbidden(); }
+      else need('complaint.final_approve');
       const method = z.enum(['EVIDENCE', 'FIELD']).parse(data.method ?? 'EVIDENCE');
       const notes = str(data.notes);
       const [ce] = await sql`SELECT id, completed_by, proposed_resolution, notes FROM completion_evidence WHERE complaint_id = ${id} AND verification_status = 'PENDING' ORDER BY completed_at DESC LIMIT 1`;
@@ -494,7 +522,7 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
       const noIssue = ce.proposed_resolution === 'NO_ISSUE_FOUND';
       if ((decision === 'approve' && noIssue) || decision === 'no_issue' || decision === 'cannot_verify') need('complaint.reject');
       if ((decision === 'no_issue' || decision === 'cannot_verify') && (!notes || notes.length < 5)) throw badRequest('err.reasonRequired');
-      if (decision === 'approve' && data.close === true && (!notes || notes.length < 3)) throw badRequest('A closure note is required');
+      if (decision === 'approve' && !noIssue && (!notes || notes.length < 3)) throw badRequest('A closure note is required');
       // Method B: the verifier visits the site — location and notes are mandatory, photo optional
       if (method === 'FIELD') {
         if (geo.latitude == null || geo.longitude == null) throw badRequest('field.needLocation');
@@ -526,30 +554,32 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
             notifyVars: { reason_en: REASON_LABEL.NOT_FOUND.en, reason_ta: REASON_LABEL.NOT_FOUND.ta },
           });
         } else {
-          await transition(id, 'COMPLETION_VERIFIED', u, { note: `Completion verified by ${how}${notes ? `: ${notes}` : ''}`, publicNote: false });
-          if (data.close === true) {
-            need('complaint.close');
-            await transition(id, 'CLOSED', u, { note: notes ?? 'Closed after verification', set: { resolution_type: 'RESOLVED', resolution_notes: notes } });
-          }
+          // Final approval closes the complaint
+          await transition(id, 'COMPLETION_VERIFIED', u, { note: `Completion approved by ${how}${notes ? `: ${notes}` : ''}`, publicNote: false });
+          await transition(id, 'CLOSED', u, { note: notes ?? 'Closed after final approval', set: { resolution_type: 'RESOLVED', resolution_notes: notes } });
         }
       } else {
         const [wa] = await sql`UPDATE assignments SET status = 'ACCEPTED', completed_at = NULL
                                WHERE id = (SELECT assignment_id FROM completion_evidence WHERE id = ${ce.id}) RETURNING assigned_to, id`;
         // Supporting assignees who were on the job return to it as well
-        const back = await sql`UPDATE assignments SET status = 'ACCEPTED', completed_at = NULL WHERE complaint_id = ${id} AND purpose = 'WORK' AND status = 'COMPLETED'
+        const back = !wa ? [] : await sql`UPDATE assignments SET status = 'ACCEPTED', completed_at = NULL WHERE complaint_id = ${id} AND purpose = 'WORK' AND status = 'COMPLETED'
                                AND assignee_role = 'SUPPORT' AND completed_at >= (SELECT completed_at FROM completion_evidence WHERE id = ${ce.id}) - interval '1 minute' RETURNING assigned_to`;
         if (wa) await sql`INSERT INTO work_updates (complaint_id, assignment_id, user_id, update_type, notes) VALUES (${id}, ${wa.id}, ${u.id}, 'SENT_BACK', ${notes})`;
         await transition(id, 'REWORK_REQUIRED', u, { note: `Rework required (${how}): ${notes}`, publicNote: false, skipCitizenNotify: true });
         const publicReason = str(data.publicReason) ?? 'The completed work did not pass verification and is being redone.';
         await addHistoryNote(id, 'REWORK_REQUIRED', u, `Rework required: ${publicReason}`, true);
         await notify(c.citizen_id as string, 'REWORK_CITIZEN', { code, reason: publicReason }, id);
-        for (const x of [wa, ...back].filter(Boolean)) await notify(x.assigned_to as string, 'REWORK_REQUIRED', { code, reason: notes }, id);
+        const reworkers = new Set([wa, ...back].filter(Boolean).map((x) => x.assigned_to as string));
+        // An officer's own completion (no field assignment) goes back to that officer
+        if (!wa && ce.completed_by !== u.id) reworkers.add(ce.completed_by as string);
+        for (const x of reworkers) await notify(x, 'REWORK_REQUIRED', { code, reason: notes }, id);
       }
       break;
     }
 
     case 'close': {
-      need('complaint.close');
+      // Older verified completions waiting for closure: final approval rights
+      need('complaint.final_approve');
       requireStatus('COMPLETION_VERIFIED');
       // Closure needs a verified completion (enforced by status) and a closure note
       const closeNote = z.string().trim().min(3, 'A closure note is required').max(2000).parse(data.note);
@@ -658,6 +688,24 @@ async function perform(run: Run, action: string, data: Record<string, unknown>, 
   }
 }
 
+/**
+ * "Mark as completed" evidence: a reference photo and GPS always; lower grade within FIELD_RADIUS_M of the
+ * complaint, and a live camera photo when submitting from a phone (see completion-policy).
+ */
+function checkCompletion(u: AuthUser, mobile: boolean, c: Record<string, unknown>, data: Record<string, unknown>, photos: File[], noIssue: boolean) {
+  if (!photos.length) throw badRequest(noIssue ? 'Site photo is required' : 'field.completionPhoto');
+  const lat = num(data.latitude as never);
+  const lng = num(data.longitude as never);
+  if (lat == null || lng == null) throw badRequest('field.needLocation');
+  const pol = completionPolicy(u.roleRank, mobile, c.latitude, c.longitude);
+  const dist = pol.target ? Math.round(distanceM(lat, lng, pol.target.lat, pol.target.lng)) : null;
+  if (pol.maxDistanceM != null && dist != null && dist > pol.maxDistanceM) throw badRequest('complete.tooFar');
+  const meta = z.array(z.object({ source: z.enum(['CAMERA', 'FILE']), ageMs: z.coerce.number() })).max(5).catch([]).parse(data.photoMeta) as PhotoMeta[];
+  const live = photos.every((_, i) => isLivePhoto(meta[i]));
+  if (pol.liveOnly && !live) throw badRequest('complete.liveOnly');
+  return { dist, live, device: mobile ? 'MOBILE' : 'DESKTOP', source: live ? 'CAMERA' as const : 'UPLOAD' as const };
+}
+
 function str(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim().slice(0, 2000);
@@ -677,6 +725,19 @@ async function supervisorCandidate(u: AuthUser, userId: string, localBodyId: num
   return row;
 }
 
+/**
+ * Officer completions go to the EO of the local body for final approval. When the EO (or another final approver)
+ * completed the work, or the local body has no other EO, the Admins above the EO are told as well.
+ */
+async function notifyFinalApprovers(complaintId: number, localBodyId: number, u: AuthUser, vars: Record<string, string>) {
+  const eos = (await sql`SELECT DISTINCT usr.id FROM users usr JOIN roles r ON r.id = usr.role_id JOIN officials o ON o.user_id = usr.id
+                         WHERE usr.status = 'ACTIVE' AND r.code = 'EO' AND o.local_body_id = ${localBodyId} AND usr.id <> ${u.id}`).map((r) => r.id as string);
+  const admins = has(u, 'complaint.final_approve') || !eos.length
+    ? (await sql`SELECT usr.id FROM users usr JOIN roles r ON r.id = usr.role_id WHERE usr.status = 'ACTIVE' AND r.code IN ('SYSTEM_ADMIN','SUPER_ADMIN') AND usr.id <> ${u.id}`).map((r) => r.id as string)
+    : [];
+  for (const to of new Set([...eos, ...admins])) await notify(to, 'WORK_REVIEW', vars, complaintId);
+}
+
 async function assignableUser(u: AuthUser, userId: string, allowSelf: boolean, localBodyId: number) {
   if (allowSelf && userId === u.id) return { full_name: u.fullName, department_id: u.departmentId };
   const [row] = await sql`
@@ -693,7 +754,7 @@ type Step = { action: string; data: Record<string, unknown>; photos?: boolean };
  * Maps a "Record action" (action type + description + optional photos) onto the workflow steps it stands for,
  * from the complaint's current status and the user's part in it. Each step then runs every usual server check.
  */
-async function planRecord(u: AuthUser, c: { id: number; status: string }, data: Record<string, unknown>, photos: File[]): Promise<LogEntry & { steps: Step[] }> {
+async function planRecord(u: AuthUser, c: { id: number; status: string }, data: Record<string, unknown>, photos: File[], mobile: boolean): Promise<LogEntry & { steps: Step[] }> {
   const type = z.enum(RECORD_TYPES, { message: 'Choose an action type' }).parse(data.actionType);
   const description = z.string({ message: 'Describe the action / work' }).trim().min(5, 'Describe the action / work (at least 5 characters)').max(2000).parse(data.description);
   const visibility = z.enum(['INTERNAL', 'PUBLIC']).parse(data.visibility ?? (['ACTION_TAKEN', 'WORK_STARTED', 'WORK_COMPLETED'].includes(type) ? 'PUBLIC' : 'INTERNAL'));
@@ -734,9 +795,11 @@ async function planRecord(u: AuthUser, c: { id: number; status: string }, data: 
       steps.push({ action: 'start', data: { note: description, visibility, ...geo }, photos: true });
       break;
     case 'WORK_COMPLETED':
-      if (!photos.length) throw badRequest('field.completionPhoto');
-      if (notStarted) steps.push(start);
-      steps.push({ action: 'complete', data: { notes: description, submit: true, ...geo }, photos: true });
+      // Field staff complete their assignment; an officer handling the complaint marks it completed directly
+      // Photo / GPS / distance / live-photo checks first, so a refused completion never leaves the work half-started
+      checkCompletion(u, mobile, (await sql`SELECT latitude, longitude FROM complaints WHERE id = ${c.id}`)[0], { ...data, ...geo }, photos, false);
+      if (field && notStarted) steps.push(start);
+      steps.push({ action: 'complete', data: { notes: description, ...geo, photoMeta: data.photoMeta }, photos: true });
       break;
     case 'ON_HOLD':
       steps.push({ action: 'hold', data: { reason: data.holdReason ?? 'OTHER', note: description } });
@@ -765,7 +828,7 @@ const VERIFY_TYPE: Record<string, string> = { approve: 'APPROVED', send_back: 'R
 /** Log entry for a direct workflow action (the specialised forms). */
 function describeLegacy(action: string, data: Record<string, unknown>): LogEntry {
   const logType = action === 'verify_completion'
-    ? (data.decision === 'approve' && data.close === true ? 'APPROVED_CLOSED' : VERIFY_TYPE[String(data.decision)] ?? 'VERIFICATION')
+    ? (data.decision === 'approve' ? 'APPROVED_CLOSED' : VERIFY_TYPE[String(data.decision)] ?? 'VERIFICATION')
     : LEGACY_TYPE[action] ?? 'OTHER';
   const description = str(data.workDone) ?? str(data.notes) ?? str(data.note);
   const chosen = data.visibility === 'PUBLIC' ? 'PUBLIC' : data.visibility === 'INTERNAL' ? 'INTERNAL' : null;

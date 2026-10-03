@@ -117,7 +117,7 @@ export default async function OfficeComplaintDetail({ params, searchParams }: { 
       </div>
 
       <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length + appealNodes.length} startOpen={appealNodes.length > 0 || (await searchParams).action === '1'}>
-        {[...(record.types.length ? [<RecordAction key="record" code={code} types={record.types} photoTypes={record.photoTypes} />] : []), ...review, ...appealNodes, ...actions]}
+        {[...(record.types.length ? [<RecordAction key="record" code={code} types={record.types} photoTypes={record.photoTypes} completion={record.completion} />] : []), ...review, ...appealNodes, ...actions]}
       </TakeAction>
 
       <ReviewPanel d={d} lang={lang} buttons={review} />

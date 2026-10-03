@@ -50,7 +50,7 @@ export default async function AdminComplaint({ params, searchParams }: { params:
         <p className="mt-1 text-sm">👤 <Link className="font-semibold text-navy-700 underline" href={`/admin/citizens/${c.citizen_id}`}>{c.citizen_name as string}</Link>{c.assigned_name ? <> · 👷 {c.assigned_name as string}</> : null}</p>
       </div>
       <TakeAction nextStep={nextStep} count={(record.types.length ? 1 : 0) + review.length + actions.length} startOpen={(await searchParams).action === '1'}>
-        {[...(record.types.length ? [<RecordAction key="record" code={code} portal="ADMIN" types={record.types} photoTypes={record.photoTypes} />] : []), ...review, ...actions]}
+        {[...(record.types.length ? [<RecordAction key="record" code={code} portal="ADMIN" types={record.types} photoTypes={record.photoTypes} completion={record.completion} />] : []), ...review, ...actions]}
       </TakeAction>
       <ReviewPanel d={d} lang={lang} buttons={review} />
       <CitizenSubmission d={d} lang={lang} showContact={has(u, 'citizen.pii.view')} />

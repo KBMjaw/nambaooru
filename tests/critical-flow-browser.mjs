@@ -1,7 +1,7 @@
 // UI-driven check of the critical complaint flow, clicking through the real pages as each role:
 // list → click row → detail → citizen submission → TAKE ACTION → acknowledge → classify → inspection → supervisor →
 // supervisor assigns field staff → (phone) open work → Record action: work started → public + internal notes → upload evidence →
-// action taken → work completed with after photo → verifier REJECT / REWORK → redo → APPROVE & CLOSE → citizen tracking.
+// action taken → work completed with after photo → verifier REJECT / REWORK → redo → EO APPROVE & CLOSE → citizen tracking.
 // Also: Not Accepted complaint (reason / who / when, Accept), unauthorized page access, no horizontal scroll on the phone.
 // Creates tagged test records (UI-<ts>); the complaints end closed / reopened-and-closed.
 //
@@ -178,9 +178,11 @@ e = await rec(ravi.page, 'WORK_STARTED', 'Rework started: fitting the lamp cover
 ok('rework', 'field staff restarts → Work in Progress', !e && (await text(ravi.page)).includes('Work in Progress'), e ?? 'ok');
 e = await rec(ravi.page, 'WORK_COMPLETED', 'Lamp cover fitted, tested at dusk', [photo(7)]);
 ok('rework', 'new completion evidence → Verification Pending', !e && (await text(ravi.page)).includes('Verification Pending'), e ?? 'ok');
-await sup.page.reload();
-e = await act(sup.page, 'APPROVE & CLOSE', async (f) => { await f.locator('textarea').first().fill('Street light repaired; photos confirm the fix. Closing.'); });
-ok('verify', 'verifier APPROVE & CLOSE (closure note) → Closed', !e && (await text(sup.page)).includes('Closed'), e ?? 'ok');
+await sup.page.reload(); await sup.page.waitForLoadState('networkidle');
+ok('verify', 'supervisor (verifier) can send back but has no APPROVE & CLOSE — final approval is the EO\'s', (await sup.page.getByRole('button', { name: /APPROVE & CLOSE/ }).count()) === 0 && (await sup.page.getByRole('button', { name: /REJECT \/ REWORK/ }).count()) > 0, 'checked');
+await eo.page.goto(`${B}/office/complaints/${S}`, { waitUntil: 'networkidle' });
+e = await act(eo.page, 'APPROVE & CLOSE', async (f) => { await f.locator('textarea').first().fill('Street light repaired; photos confirm the fix. Closing.'); });
+ok('verify', 'EO final approval: APPROVE & CLOSE (closure note) → Closed', !e && (await text(eo.page)).includes('Closed'), e ?? 'ok');
 await eo.page.reload();
 t = await text(eo.page);
 ok('timeline', 'officer timeline lists every step with actor and visibility', ['Acknowledged', 'Verification Pending', 'Rework Required', 'Closed', 'Internal', 'Public', 'Before work', 'After (work completed)'].every((x) => t.includes(x)), 'checked');

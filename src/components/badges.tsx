@@ -24,7 +24,7 @@ const STATUS_TONE: Record<string, string> = {
 
 export function StatusBadge({ status }: { status: string }) {
   const { t } = useI18n();
-  return <span className={`badge ${STATUS_TONE[status] ?? 'bg-slate-100'}`}>{t(`status.${status}` as MessageKey)}</span>;
+  return <span data-status={status} className={`badge ${STATUS_TONE[status] ?? 'bg-slate-100'}`}>{t(`status.${status}` as MessageKey)}</span>;
 }
 
 const PR_TONE: Record<string, string> = {

@@ -6,6 +6,8 @@ import { trMsg, type MessageKey } from '@/i18n';
 import { api } from '@/lib/client-api';
 import { compressImage, getLocation, type Geo } from '@/lib/image';
 import { Alert, Spinner } from '@/components/ui';
+import type { CompletionPolicy } from '@/lib/completion-policy';
+import { completionError, distanceTo, photoMeta, policyLines, type PickedPhoto } from './completion-ui';
 
 export type RecordType = 'ACKNOWLEDGE' | 'ACCEPT' | 'INSPECT' | 'ACTION_TAKEN' | 'WORK_STARTED' | 'WORK_COMPLETED' | 'ON_HOLD' | 'REWORK_REQUIRED' | 'OTHER';
 
@@ -18,7 +20,7 @@ const MAX_PHOTOS = 5;
  * "Record an action": action type + required description (+ photo evidence where the type needs it).
  * Only the types this user may record at this stage are offered; the API re-checks everything.
  */
-export function RecordAction({ code, types, photoTypes, portal = 'OFFICE' }: { code: string; types: RecordType[]; photoTypes: RecordType[]; portal?: 'OFFICE' | 'ADMIN' }) {
+export function RecordAction({ code, types, photoTypes, portal = 'OFFICE', completion }: { code: string; types: RecordType[]; photoTypes: RecordType[]; portal?: 'OFFICE' | 'ADMIN'; completion?: CompletionPolicy }) {
   const { t } = useI18n();
   const router = useRouter();
   const [type, setType] = useState<RecordType | ''>(types.length === 1 ? types[0] : '');
@@ -27,13 +29,18 @@ export function RecordAction({ code, types, photoTypes, portal = 'OFFICE' }: { c
   const [holdReason, setHoldReason] = useState('OTHER');
   const [outcome, setOutcome] = useState('VERIFIED');
   const [publicReason, setPublicReason] = useState('');
-  const [photos, setPhotos] = useState<{ file: File; url: string }[]>([]);
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [geo, setGeo] = useState<Geo | null>(null);
   const [geoBusy, setGeoBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const completing = type === 'WORK_COMPLETED';
+  // Gallery / file upload is offered except to lower-grade staff completing work from a phone (live photo only)
+  const allowGallery = completing && !completion?.liveOnly;
+  const dist = completing ? distanceTo(completion, geo) : null;
   const needsPhoto = !!type && PHOTO_REQUIRED.includes(type);
   const canPhoto = !!type && (needsPhoto || photoTypes.includes(type));
   const showVisibility = type === 'ACTION_TAKEN' || type === 'WORK_STARTED' || type === 'OTHER';
@@ -57,12 +64,14 @@ export function RecordAction({ code, types, photoTypes, portal = 'OFFICE' }: { c
     if (description.trim().length < 5) return setError(t('ra.descNeeded'));
     if (needsPhoto && !photos.length) return setError(t('ra.photoNeeded'));
     if (type === 'INSPECT' && !geo) return setError(t('field.needLocation'));
+    if (completing) { const err = completionError(t, completion, geo, photos); if (err) return setError(err); }
     const data: Record<string, unknown> = { action: 'record', actionType: type, description: description.trim() };
     if (showVisibility) data.visibility = visibility;
     if (type === 'ON_HOLD') data.holdReason = holdReason;
     if (type === 'INSPECT') data.outcome = outcome;
     if (type === 'REWORK_REQUIRED' && publicReason.trim()) data.publicReason = publicReason.trim();
     if (geo) Object.assign(data, { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy });
+    if (photos.length && canPhoto) data.photoMeta = photoMeta(photos);
     setBusy(true);
     try {
       const url = `/api/office/complaints/${encodeURIComponent(code)}/action?portal=${portal}`;
@@ -101,6 +110,12 @@ export function RecordAction({ code, types, photoTypes, portal = 'OFFICE' }: { c
       </label>
       {type && ['ACTION_TAKEN', 'WORK_COMPLETED', 'REWORK_REQUIRED', 'INSPECT', 'ACCEPT'].includes(type) && (
         <p className="rounded-lg bg-navy-50 p-2 text-sm text-navy-800">{t(`ra.hint.${type}` as MessageKey)}</p>
+      )}
+      {completing && completion && (
+        <ul data-testid="completion-policy" className="space-y-0.5 rounded-lg bg-amber-50 p-2 text-sm text-amber-900">
+          {policyLines(t, completion).map((l) => <li key={l}>{l}</li>)}
+          <li>✅ {t('complete.finalApproval')}</li>
+        </ul>
       )}
       {type === 'ON_HOLD' && (
         <label className="block"><span className="label">{t('wf.holdReason')} *</span>
@@ -145,18 +160,26 @@ export function RecordAction({ code, types, photoTypes, portal = 'OFFICE' }: { c
               </span>
             ))}
             {photos.length < MAX_PHOTOS && <button type="button" className="btn btn-outline min-h-12" onClick={() => fileRef.current?.click()}>📷 {t('report.takePhoto')}</button>}
+            {photos.length < MAX_PHOTOS && allowGallery && <button type="button" className="btn btn-ghost min-h-12" onClick={() => galleryRef.current?.click()}>🖼️ {t('complete.gallery')}</button>}
           </div>
-          <input ref={fileRef} data-testid="record-photo" type="file" accept="image/*" capture="environment" multiple hidden onChange={async (e) => {
-            const fs = [...(e.target.files ?? [])].slice(0, MAX_PHOTOS - photos.length);
-            e.target.value = '';
-            for (const f of fs) {
-              try { const c = await compressImage(f); setPhotos((ps) => (ps.length < MAX_PHOTOS ? [...ps, { file: c.file, url: c.url }] : ps)); } catch { setError(t('err.fileType')); }
-            }
-            if (fs.length && !geo) void captureGps();
-          }} />
+          {(allowGallery ? (['CAMERA', 'FILE'] as const) : (['CAMERA'] as const)).map((source) => (
+            <input key={source} ref={source === 'CAMERA' ? fileRef : galleryRef} data-testid={source === 'CAMERA' ? 'record-photo' : 'record-gallery'} type="file" accept="image/*"
+              capture={source === 'CAMERA' ? 'environment' : undefined} multiple hidden onChange={async (e) => {
+                const fs = [...(e.target.files ?? [])].slice(0, MAX_PHOTOS - photos.length);
+                e.target.value = '';
+                for (const f of fs) {
+                  try {
+                    const c = await compressImage(f);
+                    setPhotos((ps) => (ps.length < MAX_PHOTOS ? [...ps, { file: c.file, url: c.url, source, lastModified: f.lastModified || Date.now() }] : ps));
+                  } catch { setError(t('err.fileType')); }
+                }
+                if (fs.length && !geo) void captureGps();
+              }} />
+          ))}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <button type="button" className="btn btn-outline btn-sm" onClick={captureGps} disabled={geoBusy}>{geoBusy ? <Spinner className="h-4 w-4" /> : '📍'} {t('office.captureGps')}</button>
             {geo && <span className="text-leaf-700">✓ {t('office.gpsOk')} ({geo.latitude.toFixed(5)}, {geo.longitude.toFixed(5)} ±{geo.accuracy}m)</span>}
+            {dist != null && <span data-testid="completion-distance" className={completion?.maxDistanceM != null && dist > completion.maxDistanceM ? 'font-bold text-red-700' : 'text-slate-600'}>· {t('complete.distance', { d: dist })}</span>}
           </div>
         </div>
       )}

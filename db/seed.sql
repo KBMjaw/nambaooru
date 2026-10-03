@@ -42,6 +42,8 @@ INSERT INTO permissions (code, description, is_security) VALUES
   ('complaint.work',                'Accept, start, update and complete assigned work', false),
   ('complaint.verify',              'Verify completed work', false),
   ('complaint.close',               'Close complaint', false),
+  ('complaint.complete',            'Mark complaint work completed as an officer (reference photo + GPS)', false),
+  ('complaint.final_approve',       'Final approval and closure of completed work', false),
   ('complaint.remark',              'Add remarks to complaints in jurisdiction', false),
   ('appeal.review',                 'Review reconsideration requests', false),
   ('citizen.pii.view',              'View citizen contact details where operationally necessary', false),
@@ -71,21 +73,23 @@ WITH m(role_code, perm_code) AS (VALUES
   ('SUPERVISOR','complaint.inspect'),('SUPERVISOR','complaint.assign'),('SUPERVISOR','complaint.reassign'),
   ('SUPERVISOR','complaint.escalate'),('SUPERVISOR','complaint.reject'),('SUPERVISOR','complaint.verify'),
   ('SUPERVISOR','complaint.close'),('SUPERVISOR','complaint.remark'),('SUPERVISOR','map.view'),('SUPERVISOR','analytics.view'),
-  ('SUPERVISOR','user.view'),
+  ('SUPERVISOR','user.view'),('SUPERVISOR','complaint.complete'),
 
   ('DEPT_OFFICER','complaint.view.department'),('DEPT_OFFICER','complaint.review'),('DEPT_OFFICER','complaint.schedule_inspection'),
   ('DEPT_OFFICER','complaint.inspect'),('DEPT_OFFICER','complaint.assign'),('DEPT_OFFICER','complaint.reassign'),
   ('DEPT_OFFICER','complaint.escalate'),('DEPT_OFFICER','complaint.reject'),('DEPT_OFFICER','complaint.verify'),
   ('DEPT_OFFICER','complaint.close'),('DEPT_OFFICER','complaint.remark'),('DEPT_OFFICER','map.view'),('DEPT_OFFICER','analytics.view'),
-  ('DEPT_OFFICER','user.view'),
+  ('DEPT_OFFICER','user.view'),('DEPT_OFFICER','complaint.complete'),
 
   ('EO','complaint.view.localbody'),('EO','complaint.review'),('EO','complaint.schedule_inspection'),('EO','complaint.inspect'),
   ('EO','complaint.assign'),('EO','complaint.reassign'),('EO','complaint.escalate'),('EO','complaint.reject'),
   ('EO','complaint.verify'),('EO','complaint.close'),('EO','complaint.remark'),('EO','appeal.review'),('EO','citizen.pii.view'),
   ('EO','map.view'),('EO','analytics.view'),('EO','audit.view'),('EO','user.view'),('EO','user.manage'),
+  ('EO','complaint.complete'),('EO','complaint.final_approve'),
 
   ('SYSTEM_ADMIN','complaint.view.all'),('SYSTEM_ADMIN','analytics.view'),('SYSTEM_ADMIN','audit.view'),('SYSTEM_ADMIN','map.view'),
-  ('SYSTEM_ADMIN','location.manage'),('SYSTEM_ADMIN','masterdata.manage'),('SYSTEM_ADMIN','language.manage'),('SYSTEM_ADMIN','user.view')
+  ('SYSTEM_ADMIN','location.manage'),('SYSTEM_ADMIN','masterdata.manage'),('SYSTEM_ADMIN','language.manage'),('SYSTEM_ADMIN','user.view'),
+  ('SYSTEM_ADMIN','complaint.final_approve')
 )
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM m JOIN roles r ON r.code = m.role_code JOIN permissions p ON p.code = m.perm_code
@@ -122,7 +126,7 @@ UPDATE permissions p SET label = v.label, perm_group = v.grp FROM (VALUES
   ('complaint.assign','ASSIGN_COMPLAINT','Complaints'),('complaint.reassign','REASSIGN_COMPLAINT','Complaints'),
   ('complaint.escalate','ESCALATE_COMPLAINT','Complaints'),('complaint.reject','REJECT_COMPLAINT','Complaints'),
   ('complaint.work','UPDATE_PROGRESS','Work'),('evidence.upload','UPLOAD_EVIDENCE','Work'),('action.create','ADD_ACTION','Work'),('action.edit','EDIT_ACTION','Work'),
-  ('complaint.verify','VERIFY_COMPLETION','Complaints'),('complaint.close','CLOSE_COMPLAINT','Complaints'),('complaint.reopen','REOPEN_COMPLAINT','Complaints'),
+  ('complaint.verify','VERIFY_COMPLETION','Complaints'),('complaint.close','CLOSE_COMPLAINT','Complaints'),('complaint.final_approve','FINAL_APPROVE','Complaints'),('complaint.complete','MARK_COMPLETED','Work'),('complaint.reopen','REOPEN_COMPLAINT','Complaints'),
   ('complaint.remark','ADD_REMARK','Complaints'),('appeal.review','REVIEW_APPEALS','Complaints'),
   ('citizen.pii.view','VIEW_CITIZEN_CONTACT','Citizens'),('citizen.view','VIEW_CITIZENS','Citizens'),('citizen.manage','MANAGE_CITIZENS','Citizens'),
   ('map.view','VIEW_MAP','Maps & analytics'),('wardmap.view','VIEW_WARD_MAPS','Maps & analytics'),('wardmap.edit','EDIT_WARD_MAPS','Maps & analytics'),
@@ -165,7 +169,7 @@ SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
 WHERE r.code = 'SUPER_ADMIN'
   AND p.code NOT IN ('complaint.create','complaint.view.own','appeal.create','complaint.review','complaint.schedule_inspection',
                      'complaint.inspect','complaint.reject','complaint.work','evidence.upload',
-                     'complaint.verify','complaint.close','complaint.escalate','appeal.review',
+                     'complaint.verify','complaint.close','complaint.escalate','appeal.review','complaint.complete',
                      'complaint.view.localbody','complaint.view.department','complaint.view.ward','complaint.view.assigned')
 ON CONFLICT DO NOTHING;
 
@@ -318,19 +322,20 @@ ON CONFLICT (code, local_body_id) DO NOTHING;
 -- ---------------------------------------------------------------------------
 -- Complaint categories
 -- ---------------------------------------------------------------------------
+-- inspection_required: site inspection is optional for every category (migration 009)
 INSERT INTO complaint_categories (code, name_en, name_ta, icon, default_department, evidence_required, evidence_types, inspection_required, default_priority, sort_order) VALUES
-  ('STREET_LIGHT',  'Street Light',               'தெரு விளக்கு',               '💡', 'ELECTRICAL',    true,  '{photo}',       true,  'MEDIUM', 1),
-  ('WATER_SUPPLY',  'Drinking Water Supply',      'குடிநீர் விநியோகம்',          '🚰', 'WATER',         false, '{photo,video}', true,  'HIGH',   2),
-  ('WATER_LEAK',    'Water Pipeline Leak',        'குடிநீர் குழாய் உடைப்பு',      '💧', 'WATER',         true,  '{photo,video}', true,  'HIGH',   3),
-  ('DRAINAGE',      'Drainage / Sewage',          'கழிவுநீர் / வடிகால்',          '🌊', 'SANITATION',    true,  '{photo,video}', true,  'HIGH',   4),
-  ('ROAD_DAMAGE',   'Road Damage / Potholes',     'சாலை சேதம் / குழிகள்',         '🛣️', 'ENGINEERING',   true,  '{photo}',       true,  'MEDIUM', 5),
-  ('GARBAGE',       'Garbage / Solid Waste',      'குப்பை / திடக்கழிவு',          '🗑️', 'SANITATION',    true,  '{photo}',       true,  'MEDIUM', 6),
-  ('MOSQUITO',      'Mosquito / Public Health',   'கொசு / பொது சுகாதாரம்',        '🦟', 'HEALTH',        false, '{photo}',       true,  'MEDIUM', 7),
-  ('STRAY_ANIMALS', 'Stray Dogs / Animals',       'தெருநாய் / கால்நடைகள்',        '🐕', 'HEALTH',        false, '{photo,video}', true,  'MEDIUM', 8),
-  ('TREE_FALL',     'Fallen Tree / Branches',     'மரம் / கிளை விழுந்தது',        '🌳', 'ENGINEERING',   true,  '{photo}',       true,  'HIGH',   9),
-  ('PUBLIC_TOILET', 'Public Toilet',              'பொதுக் கழிப்பறை',             '🚻', 'SANITATION',    true,  '{photo}',       true,  'MEDIUM', 10),
-  ('ENCROACHMENT',  'Encroachment',               'ஆக்கிரமிப்பு',                '🚧', 'TOWN_PLANNING', true,  '{photo}',       true,  'LOW',    11),
-  ('OTHER',         'Other Civic Issue',          'பிற குடிமைப் பிரச்சினை',       '📌', 'GENERAL_ADMIN', false, '{photo,video}', true,  'MEDIUM', 99)
+  ('STREET_LIGHT',  'Street Light',               'தெரு விளக்கு',               '💡', 'ELECTRICAL',    true,  '{photo}',       false,  'MEDIUM', 1),
+  ('WATER_SUPPLY',  'Drinking Water Supply',      'குடிநீர் விநியோகம்',          '🚰', 'WATER',         false, '{photo,video}', false,  'HIGH',   2),
+  ('WATER_LEAK',    'Water Pipeline Leak',        'குடிநீர் குழாய் உடைப்பு',      '💧', 'WATER',         true,  '{photo,video}', false,  'HIGH',   3),
+  ('DRAINAGE',      'Drainage / Sewage',          'கழிவுநீர் / வடிகால்',          '🌊', 'SANITATION',    true,  '{photo,video}', false,  'HIGH',   4),
+  ('ROAD_DAMAGE',   'Road Damage / Potholes',     'சாலை சேதம் / குழிகள்',         '🛣️', 'ENGINEERING',   true,  '{photo}',       false,  'MEDIUM', 5),
+  ('GARBAGE',       'Garbage / Solid Waste',      'குப்பை / திடக்கழிவு',          '🗑️', 'SANITATION',    true,  '{photo}',       false,  'MEDIUM', 6),
+  ('MOSQUITO',      'Mosquito / Public Health',   'கொசு / பொது சுகாதாரம்',        '🦟', 'HEALTH',        false, '{photo}',       false,  'MEDIUM', 7),
+  ('STRAY_ANIMALS', 'Stray Dogs / Animals',       'தெருநாய் / கால்நடைகள்',        '🐕', 'HEALTH',        false, '{photo,video}', false,  'MEDIUM', 8),
+  ('TREE_FALL',     'Fallen Tree / Branches',     'மரம் / கிளை விழுந்தது',        '🌳', 'ENGINEERING',   true,  '{photo}',       false,  'HIGH',   9),
+  ('PUBLIC_TOILET', 'Public Toilet',              'பொதுக் கழிப்பறை',             '🚻', 'SANITATION',    true,  '{photo}',       false,  'MEDIUM', 10),
+  ('ENCROACHMENT',  'Encroachment',               'ஆக்கிரமிப்பு',                '🚧', 'TOWN_PLANNING', true,  '{photo}',       false,  'LOW',    11),
+  ('OTHER',         'Other Civic Issue',          'பிற குடிமைப் பிரச்சினை',       '📌', 'GENERAL_ADMIN', false, '{photo,video}', false,  'MEDIUM', 99)
 ON CONFLICT (code) DO NOTHING;
 
 -- SLA rules: defaults by priority + category overrides

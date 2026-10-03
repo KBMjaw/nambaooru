@@ -207,8 +207,9 @@ ok('dash', 'complaint listed under Rework required', (await page(eo, '/office/co
 ok('ui', 'field staff home shows the rework reason', (await page(ravi, '/office')).includes('Lamp flickers at night'), 'checked');
 expect('rework', 'field staff restarts (rework) → IN PROGRESS', await act(ravi, S, { action: 'start', note: 'Fixing flicker' }), 200);
 expect('rework', 'field staff completes again (photo + GPS)', await act(ravi, S, { action: 'complete', notes: 'Choke replaced, no flicker', ...GPS }, 1), 200);
-expect('close', 'approve + close without a closure note is refused', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', close: true }), 400);
-expect('verify', 'supervisor approves by evidence review (method A) and closes', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'Photos confirm the fix', close: true }), 200);
+expect('verify', 'supervisor cannot give the final approval (EO / Admin only)', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'Photos confirm the fix' }), 403);
+expect('close', 'final approval without a closure note is refused', await act(eo, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE' }), 400);
+expect('verify', 'EO gives the final approval by evidence review (method A), which closes it', await act(eo, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'Photos confirm the fix' }), 200);
 ok('refresh', 'after reload the complaint shows Closed', await shows(A, `/complaints/${S}`, 'Closed'), 'checked');
 ok('notify', 'citizen notified: Resolution verified', await hasNotif(A, 'PUBLIC', S, 'Resolution verified'), 'checked');
 ok('notify', 'citizen notified: Complaint closed', await hasNotif(A, 'PUBLIC', S, 'Complaint closed'), 'checked');
@@ -269,9 +270,9 @@ expect('reopen', 'EO reopens the closed street-light complaint', await act(eo, S
 expect('reopen', 'EO sends it straight back to Ravi', await act(eo, S, { action: 'assign', assigneeId: RAVI, note: 'Please check again' }), 200);
 expect('reopen', 'Ravi restarts work → IN PROGRESS', await act(ravi, S, { action: 'start' }), 200);
 expect('reopen', 'Ravi completes again', await act(ravi, S, { action: 'complete', notes: 'Loose connection fixed', ...GPS }, 1), 200);
-expect('reopen', 'supervisor verifies without closing', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'OK' }), 200);
-expect('close', 'closing without a closure note is refused', await act(eo, S, { action: 'close' }), 400);
-expect('close', 'EO closes with a closure note', await act(eo, S, { action: 'close', note: 'Connection repaired and verified' }), 200);
+expect('reopen', 'supervisor cannot approve the completion', await act(sup, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'OK' }), 403);
+expect('close', 'closing without a closure note is refused', await act(eo, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE' }), 400);
+expect('close', 'EO approves and closes with a closure note', await act(eo, S, { action: 'verify_completion', decision: 'approve', method: 'EVIDENCE', notes: 'Connection repaired and verified' }), 200);
 
 // ============================================================================ 5c. Field verification finds it cannot be verified; outside jurisdiction
 const V = await file(B, 'Street light near market not working some nights');

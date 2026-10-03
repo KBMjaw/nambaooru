@@ -39,8 +39,9 @@ export function myActionSql(u: AuthUser) {
   const byPerm: string[] = [];
   if (has(u, 'complaint.review')) byPerm.push('SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW');
   if (has(u, 'complaint.assign')) byPerm.push('VERIFIED');
-  if (has(u, 'complaint.verify')) byPerm.push('WORK_COMPLETED', 'VERIFICATION_PENDING');
-  if (has(u, 'complaint.close')) byPerm.push('COMPLETION_VERIFIED');
+  // Final approval (EO / Admin above the EO) of completed work; Supervisors / Dept officers who verify can send it back
+  if (has(u, 'complaint.verify') || has(u, 'complaint.final_approve')) byPerm.push('WORK_COMPLETED', 'VERIFICATION_PENDING');
+  if (has(u, 'complaint.final_approve')) byPerm.push('COMPLETION_VERIFIED');
   const perm = byPerm.length && u.scope !== 'ASSIGNED' ? sql`c.status IN ${sql(byPerm)}` : sql`FALSE`;
   return sql`(${perm} OR EXISTS (SELECT 1 FROM assignments a WHERE a.complaint_id = c.id AND a.assigned_to = ${u.id} AND a.status IN ('PENDING','ACCEPTED','IN_PROGRESS')
       AND ((a.purpose = 'WORK' AND a.assignee_role IN ('PRIMARY','SUPPORT') AND c.status IN ('ASSIGNED','IN_PROGRESS','ON_HOLD','REWORK_REQUIRED'))
@@ -146,8 +147,9 @@ export function canTakeAction(u: AuthUser, r: Record<string, unknown>) {
   if (FINAL.includes(status)) return has(u, 'complaint.reopen');
   if (has(u, 'complaint.review') || has(u, 'complaint.assign') || has(u, 'complaint.remark') || r.on_team) return true;
   if (has(u, 'complaint.reject') || (has(u, 'complaint.escalate') && ((r.escalation_level as number) ?? 0) < 4)) return true;
-  if (has(u, 'complaint.verify') && ['WORK_COMPLETED', 'VERIFICATION_PENDING'].includes(status)) return true;
-  if (has(u, 'complaint.close') && status === 'COMPLETION_VERIFIED') return true;
+  if ((has(u, 'complaint.verify') || has(u, 'complaint.final_approve')) && ['WORK_COMPLETED', 'VERIFICATION_PENDING'].includes(status)) return true;
+  if (has(u, 'complaint.final_approve') && status === 'COMPLETION_VERIFIED') return true;
+  if (has(u, 'complaint.complete') && [...INTAKE, 'SITE_INSPECTION', 'VERIFIED', ...WORK].includes(status)) return true;
   if (has(u, 'complaint.schedule_inspection') && INTAKE.includes(status)) return true;
   if (has(u, 'complaint.reassign') && WORK.includes(status)) return true;
   if (has(u, 'complaint.inspect') && status === 'SITE_INSPECTION' && (u.scope !== 'ASSIGNED' || r.my_inspection)) return true;

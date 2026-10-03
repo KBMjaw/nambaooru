@@ -6,11 +6,15 @@ import type { ComplaintDetail } from '@/lib/complaint-detail';
 import type { TFn, MessageKey } from '@/i18n';
 import { ActionForm, type UserOpt, type ClassifyOpts } from './ActionForm';
 import type { RecordType } from './RecordAction';
+import { completionPolicy } from '@/lib/completion-policy';
+import { requestIsMobile } from '@/lib/request-device';
 
 const WORK = ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'];
 const RESOLVABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'VERIFICATION_PENDING'];
 const FINAL = ['CLOSED', 'REJECTED', 'DUPLICATE'];
 const ACTIVE = ['PENDING', 'ACCEPTED', 'IN_PROGRESS'];
+/** Open stages from which an officer handling the complaint may mark it completed (the action API re-checks). */
+const OFFICER_COMPLETABLE = ['SUBMITTED', 'AI_CLASSIFIED', 'REOPENED', 'INITIAL_REVIEW', 'SITE_INSPECTION', 'VERIFIED', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED'];
 
 interface Work { staff: UserOpt[]; staffWithSelf: UserOpt[]; supervisors: UserOpt[]; departments: { id: number; name_en: string }[] }
 
@@ -59,8 +63,10 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
   // ---- Field work (the assignee's own actions come first: that is their job) ----
   const fieldActor = !!myWork && has(u, 'complaint.work');
   // Start / accept / action taken / completion / notes / hold are recorded through "Record an action" (RecordAction)
+  // Photo + GPS rules for "Mark as completed" (distance and live photo for lower grade; GPS only for higher grade)
+  const completion = completionPolicy(u.roleRank, await requestIsMobile(), c.latitude, c.longitude);
   if (fieldActor && ['ASSIGNED', 'IN_PROGRESS'].includes(status))
-    nodes.push(<ActionForm key={k('ni')} {...P} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} />);
+    nodes.push(<ActionForm key={k('ni')} {...P} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} completion={completion} />);
   const onTeam = d.assignments.some((a) => a.assigned_to === u.id && ACTIVE.includes(a.status as string));
   if ((fieldActor || (has(u, 'evidence.upload') && u.scope !== 'ASSIGNED')) && ['ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'REWORK_REQUIRED', 'SITE_INSPECTION', 'VERIFIED'].includes(status))
     nodes.push(<ActionForm key={k('ue')} {...P} action="upload_evidence" label={t('wf.uploadEvidence')} icon="📷" tone="btn-outline" fields={['evidenceKind', 'photoRequired', 'gps', 'note']} defaults={{ evidenceKind: status === 'ASSIGNED' ? 'BEFORE_WORK' : 'PROGRESS' }} />);
@@ -94,15 +100,17 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
   if (open && has(u, 'complaint.assign'))
     nodes.push(<ActionForm key={k('due')} {...P} action="set_due" label={t('wf.setDue')} icon="📅" tone="btn-ghost" fields={['dueRequired', 'noteRequired']} />);
 
-  // ---- Verification & closure ----
-  if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && has(u, 'complaint.verify') && pending && pending.completed_by !== u.id) {
+  // ---- Final approval (EO / Admin above the EO) & send back for rework (also Supervisor / Dept officer) ----
+  const canFinal = has(u, 'complaint.final_approve');
+  const canReview = canFinal || has(u, 'complaint.verify');
+  if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && canReview && pending && pending.completed_by !== u.id) {
     review.push(...reviewButtons(u, code, portal, noIssue, t));
-    if (has(u, 'complaint.reject') && !noIssue) {
+    if (canFinal && has(u, 'complaint.reject') && !noIssue) {
       nodes.push(<ActionForm key={k('vni')} {...P} action="verify_completion" label={t('wf.verifyNoIssue')} icon="🚫" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'no_issue' }} defaults={{ method: 'FIELD' }} />);
       nodes.push(<ActionForm key={k('vcv')} {...P} action="verify_completion" label={t('wf.verifyCannot')} icon="❔" tone="btn-ghost" fields={['method', 'notes']} extra={{ decision: 'cannot_verify' }} defaults={{ method: 'FIELD' }} />);
     }
   }
-  if (status === 'COMPLETION_VERIFIED' && has(u, 'complaint.close'))
+  if (status === 'COMPLETION_VERIFIED' && canFinal)
     nodes.push(<ActionForm key={k('cl')} {...P} action="close" label={t('office.close')} icon="🔒" tone="btn-primary" fields={['noteRequired']} hint={t('wf.closeHint')} />);
   if (RESOLVABLE.includes(status) && has(u, 'complaint.reject'))
     nodes.push(<ActionForm key={k('rj')} {...P} action="reject" label={t('wf.resolveAs')} icon="⛔" tone="btn-danger" fields={['reason', 'notes']}
@@ -125,25 +133,30 @@ export async function complaintActions(u: AuthUser, d: ComplaintDetail, work: Wo
     types.push('ACTION_TAKEN');
     if (status !== 'IN_PROGRESS') types.push('WORK_STARTED');
     types.push('WORK_COMPLETED');
+  } else if (!fieldActor && has(u, 'complaint.complete') && OFFICER_COMPLETABLE.includes(status)) {
+    // "Mark as completed" for every category by the officer handling the complaint (incl. the EO)
+    types.push('WORK_COMPLETED');
   }
   if (canHold && ['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(status)) types.push('ON_HOLD');
-  if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && has(u, 'complaint.verify') && pending && pending.completed_by !== u.id) types.push('REWORK_REQUIRED');
+  if (['VERIFICATION_PENDING', 'WORK_COMPLETED'].includes(status) && canReview && pending && pending.completed_by !== u.id) types.push('REWORK_REQUIRED');
   if (open && (has(u, 'complaint.remark') || onTeam)) types.push('OTHER');
   const photoTypes: RecordType[] = fieldActor ? ['WORK_STARTED', 'OTHER', 'REWORK_REQUIRED'] : ['REWORK_REQUIRED'];
 
   const nextKey = (status === 'VERIFICATION_PENDING' && noIssue ? 'next.NO_ISSUE' : `next.${status}`) as MessageKey;
   const holdText = status === 'ON_HOLD' && c.on_hold_reason ? ` — ${t(`hold.${c.on_hold_reason}` as MessageKey)}${c.on_hold_note ? `: ${c.on_hold_note}` : ''}` : '';
-  return { nodes, review, record: { types, photoTypes }, nextStep: `${t(nextKey)}${holdText}` };
+  return { nodes, review, record: { types, photoTypes, completion }, nextStep: `${t(nextKey)}${holdText}` };
 }
 
-/** APPROVE & CLOSE (or APPROVE when this reviewer cannot close) and REJECT / REWORK for completed work. */
+/**
+ * Final approval — APPROVE & CLOSE (EO / Admin above the EO) — and REJECT / REWORK for completed work.
+ * A Supervisor / Dept officer who verifies work sees only REWORK.
+ */
 export function reviewButtons(u: AuthUser, code: string, portal: 'OFFICE' | 'ADMIN', noIssue: boolean, t: TFn): ReactNode[] {
   const P = { code, portal, block: true } as const;
   const out: ReactNode[] = [];
-  const canClose = has(u, 'complaint.close') && !noIssue;
-  if (!noIssue || has(u, 'complaint.reject'))
-    out.push(<ActionForm key="rv-approve" {...P} action="verify_completion" label={noIssue ? t('wf.confirmNoIssue') : t(canClose ? 'rv.approveClose' : 'rv.approve')} icon="✅" tone="btn-primary"
-      fields={canClose ? ['notesRequired'] : ['method', 'notes']} notesLabel={t(canClose ? 'rv.closeNote' : 'rv.approveNote')} extra={canClose ? { decision: 'approve', close: true, method: 'EVIDENCE' } : { decision: 'approve' }} defaults={{ method: 'EVIDENCE' }} />);
+  if (has(u, 'complaint.final_approve') && (!noIssue || has(u, 'complaint.reject')))
+    out.push(<ActionForm key="rv-approve" {...P} action="verify_completion" label={noIssue ? t('wf.confirmNoIssue') : t('rv.approveClose')} icon="✅" tone="btn-primary"
+      fields={noIssue ? ['method', 'notes'] : ['notesRequired']} notesLabel={t(noIssue ? 'rv.approveNote' : 'rv.closeNote')} extra={noIssue ? { decision: 'approve' } : { decision: 'approve', method: 'EVIDENCE' }} defaults={{ method: 'EVIDENCE' }} />);
   out.push(<ActionForm key="rv-rework" {...P} action="verify_completion" label={t('rv.rework')} icon="↩️" tone="btn-danger" fields={['notesRequired', 'publicReason']} notesLabel={t('rv.reworkReason')}
     extra={{ decision: 'send_back', method: 'EVIDENCE' }} hint={t('ra.hint.REWORK_REQUIRED')} />);
   return out;

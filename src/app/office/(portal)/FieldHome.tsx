@@ -7,6 +7,8 @@ import { StatusBadge, PriorityBadge } from '@/components/badges';
 import { ActionForm } from '@/components/office/ActionForm';
 import { Empty, Alert } from '@/components/ui';
 import type { MessageKey } from '@/i18n';
+import { completionPolicy } from '@/lib/completion-policy';
+import { requestIsMobile } from '@/lib/request-device';
 
 /** Field staff mobile view — action-oriented, no admin dashboards. */
 export async function FieldHome() {
@@ -33,6 +35,7 @@ export async function FieldHome() {
     LEFT JOIN complaint_categories cat ON cat.id = c.category_id LEFT JOIN wards w ON w.id = c.ward_id
     WHERE x.user_id = ${u.id} AND x.removed_at IS NULL AND ca.status IN ('PENDING','ASSIGNED','IN_PROGRESS')
     ORDER BY CASE ca.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, ca.due_at NULLS LAST`;
+  const mobile = await requestIsMobile();
   const L = (en: unknown, ta: unknown) => String((lang === 'ta' ? ta || en : en || ta) ?? '');
   const inspections = works.filter((w) => w.purpose === 'INSPECTION');
   const rework = works.filter((w) => w.purpose === 'WORK' && w.status === 'REWORK_REQUIRED');
@@ -74,11 +77,11 @@ export async function FieldHome() {
               {['ASSIGNED', 'REWORK_REQUIRED'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="start" label={t(w.status === 'REWORK_REQUIRED' ? 'wf.startRework' : 'field.start')} icon="▶️" tone="btn-primary" fields={['photo', 'gps', 'note']} hint={t('wf.beforePhotoHint')} block /></div>}
               {w.status === 'IN_PROGRESS' && (
                 <>
-                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gps', 'submitToggle']} hint={t('wf.completeHint')} block /></div>
+                  <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="complete" label={t('wf.markCompleted')} icon="✅" tone="btn-primary" fields={['notesRequired', 'photoRequired', 'gpsRequired']} hint={t('wf.completeHint')} completion={completionPolicy(u.roleRank, mobile, w.latitude, w.longitude)} block /></div>
                   <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="progress" label={t('field.progress')} icon="📤" tone="btn-outline" fields={['workDone', 'notes', 'visibility', 'progress', 'photo', 'gps']} defaults={{ visibility: 'PUBLIC' }} block /></div>
                 </>
               )}
-              {['ASSIGNED', 'IN_PROGRESS'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} block /></div>}
+              {['ASSIGNED', 'IN_PROGRESS'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="report_no_issue" label={t('wf.reportNoIssue')} icon="🚫" tone="btn-outline" fields={['notes', 'photoRequired', 'gpsRequired']} hint={t('wf.reportNoIssueHint')} completion={completionPolicy(u.roleRank, mobile, w.latitude, w.longitude)} block /></div>}
               {['ASSIGNED', 'IN_PROGRESS', 'REWORK_REQUIRED'].includes(w.status as string) && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="hold" label={t('wf.hold')} icon="⏸️" tone="btn-ghost" fields={['holdReason', 'note']} block /></div>}
               {w.status === 'ON_HOLD' && <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="resume" label={t('wf.resume')} icon="▶️" tone="btn-primary" fields={['note']} block /></div>}
               <div className="col-span-2 w-full sm:w-auto"><ActionForm code={w.code as string} action="upload_evidence" label={t('wf.uploadEvidence')} icon="📷" tone="btn-outline" fields={['evidenceKind', 'photoRequired', 'gps', 'note']} defaults={{ evidenceKind: w.status === 'ASSIGNED' ? 'BEFORE_WORK' : 'PROGRESS' }} block /></div>
