@@ -1,0 +1,18 @@
+import { requirePageUser } from '@/lib/auth';
+import { getT } from '@/i18n/server';
+import { MasterTable } from '@/components/admin/MasterTable';
+
+export default async function Page() {
+  await requirePageUser('ADMIN', 'masterdata.manage');
+  const { t } = await getT();
+  return (
+    <div className="space-y-3">
+      <h1 className="text-xl font-extrabold text-slate-800">🏷️ {t('nav.categories')}</h1>
+      <MasterTable entity="complaint_categories" />
+      <h2 className="pt-4 text-lg font-extrabold text-slate-800">🗂️ {t('wf.subcategory')}</h2>
+      <MasterTable entity="complaint_subcategories" />
+      <h2 className="pt-4 text-lg font-extrabold text-slate-800">🔖 {t('wf.issueTypes')}</h2>
+      <MasterTable entity="complaint_issue_types" />
+    </div>
+  );
+}
