@@ -33,3 +33,14 @@ CREATE INDEX IF NOT EXISTS idx_evidence_workflow_action ON complaint_evidence(wo
 ALTER TABLE complaint_evidence DROP CONSTRAINT IF EXISTS complaint_evidence_kind_check;
 ALTER TABLE complaint_evidence ADD CONSTRAINT complaint_evidence_kind_check CHECK (kind IN (
   'CITIZEN','INSPECTION','PROGRESS','COMPLETION','APPEAL','ACTION','BEFORE_WORK','VERIFICATION','AFTER','ACTION_REFERENCE'));
+
+-- Same protection as every other table (migrations 002–006): row-level security on with no policies, so the
+-- Supabase API roles (anon / authenticated) get nothing; the application role reads and appends to the log.
+DO $$
+BEGIN
+  ALTER TABLE public.complaint_action_log ENABLE ROW LEVEL SECURITY;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nambaooru_app') THEN
+    EXECUTE 'GRANT SELECT, INSERT ON complaint_action_log TO nambaooru_app';
+    EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE complaint_action_log_id_seq TO nambaooru_app';
+  END IF;
+END $$;
